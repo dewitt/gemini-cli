@@ -445,6 +445,47 @@ export function createPolicyUpdater(
       }
 
       if (message.persist) {
+        // Validation safeguards for auto-adding to persistent policy
+        if (!toolName || toolName === '*') {
+          coreEvents.emitFeedback(
+            'warning',
+            'Policy for all tools was not auto-saved for safety reasons. You can add it manually to your policy file if desired.',
+          );
+          return;
+        }
+
+        const broadPatterns = ['.*', '^.*$', '^.*', '.*$'];
+        if (
+          message.argsPattern &&
+          broadPatterns.includes(message.argsPattern.trim())
+        ) {
+          coreEvents.emitFeedback(
+            'warning',
+            `Policy for "${toolName}" with all arguments was not auto-saved for safety reasons. You can add it manually to your policy file if desired.`,
+          );
+          return;
+        }
+
+        // Sensitive tools MUST have a specific pattern or prefix to be auto-saved
+        const sensitiveTools = [
+          'shell',
+          'write_file',
+          'edit',
+          'read_file',
+          'list_directory',
+        ];
+        if (
+          sensitiveTools.includes(toolName) &&
+          !message.argsPattern &&
+          !message.commandPrefix
+        ) {
+          coreEvents.emitFeedback(
+            'warning',
+            `Broad approval for "${toolName}" was not auto-saved for safety reasons. Approvals for sensitive tools must be specific to be auto-saved.`,
+          );
+          return;
+        }
+
         persistenceQueue = persistenceQueue.then(async () => {
           try {
             const workspacePoliciesDir = storage.getWorkspacePoliciesDir();

@@ -821,6 +821,7 @@ export async function loadCliConfig(
     listExtensions: argv.listExtensions || false,
     listSessions: argv.listSessions || false,
     deleteSession: argv.deleteSession,
+    autoAddPolicy: settings.security?.autoAddPolicy,
     enabledExtensions: argv.extensions,
     extensionLoader: extensionManager,
     enableExtensionReloading: settings.experimental?.extensionReloading,

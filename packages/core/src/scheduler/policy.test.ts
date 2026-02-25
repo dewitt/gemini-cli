@@ -150,6 +150,7 @@ describe('policy.ts', () => {
   describe('updatePolicy', () => {
     it('should set AUTO_EDIT mode for auto-edit transition tools', async () => {
       const mockConfig = {
+        getAutoAddPolicy: vi.fn().mockReturnValue(false),
         setApprovalMode: vi.fn(),
       } as unknown as Mocked<Config>;
       const mockMessageBus = {
@@ -168,11 +169,18 @@ describe('policy.ts', () => {
       expect(mockConfig.setApprovalMode).toHaveBeenCalledWith(
         ApprovalMode.AUTO_EDIT,
       );
-      expect(mockMessageBus.publish).not.toHaveBeenCalled();
+      expect(mockMessageBus.publish).toHaveBeenCalledWith(
+        expect.objectContaining({
+          type: MessageBusType.UPDATE_POLICY,
+          toolName: 'replace',
+          persist: false,
+        }),
+      );
     });
 
     it('should handle standard policy updates (persist=false)', async () => {
       const mockConfig = {
+        getAutoAddPolicy: vi.fn().mockReturnValue(false),
         setApprovalMode: vi.fn(),
       } as unknown as Mocked<Config>;
       const mockMessageBus = {
@@ -198,6 +206,7 @@ describe('policy.ts', () => {
 
     it('should handle standard policy updates with persistence', async () => {
       const mockConfig = {
+        getAutoAddPolicy: vi.fn().mockReturnValue(false),
         setApprovalMode: vi.fn(),
       } as unknown as Mocked<Config>;
       const mockMessageBus = {
@@ -223,6 +232,7 @@ describe('policy.ts', () => {
 
     it('should handle shell command prefixes', async () => {
       const mockConfig = {
+        getAutoAddPolicy: vi.fn().mockReturnValue(false),
         setApprovalMode: vi.fn(),
       } as unknown as Mocked<Config>;
       const mockMessageBus = {
@@ -254,6 +264,7 @@ describe('policy.ts', () => {
 
     it('should handle MCP policy updates (server scope)', async () => {
       const mockConfig = {
+        getAutoAddPolicy: vi.fn().mockReturnValue(false),
         setApprovalMode: vi.fn(),
       } as unknown as Mocked<Config>;
       const mockMessageBus = {
@@ -288,6 +299,7 @@ describe('policy.ts', () => {
 
     it('should NOT publish update for ProceedOnce', async () => {
       const mockConfig = {
+        getAutoAddPolicy: vi.fn().mockReturnValue(false),
         setApprovalMode: vi.fn(),
       } as unknown as Mocked<Config>;
       const mockMessageBus = {
@@ -306,6 +318,7 @@ describe('policy.ts', () => {
 
     it('should NOT publish update for Cancel', async () => {
       const mockConfig = {
+        getAutoAddPolicy: vi.fn().mockReturnValue(false),
         setApprovalMode: vi.fn(),
       } as unknown as Mocked<Config>;
       const mockMessageBus = {
@@ -323,6 +336,7 @@ describe('policy.ts', () => {
 
     it('should NOT publish update for ModifyWithEditor', async () => {
       const mockConfig = {
+        getAutoAddPolicy: vi.fn().mockReturnValue(false),
         setApprovalMode: vi.fn(),
       } as unknown as Mocked<Config>;
       const mockMessageBus = {
@@ -342,6 +356,7 @@ describe('policy.ts', () => {
 
     it('should handle MCP ProceedAlwaysTool (specific tool name)', async () => {
       const mockConfig = {
+        getAutoAddPolicy: vi.fn().mockReturnValue(false),
         setApprovalMode: vi.fn(),
       } as unknown as Mocked<Config>;
       const mockMessageBus = {
@@ -376,6 +391,7 @@ describe('policy.ts', () => {
 
     it('should handle MCP ProceedAlways (persist: false)', async () => {
       const mockConfig = {
+        getAutoAddPolicy: vi.fn().mockReturnValue(false),
         setApprovalMode: vi.fn(),
       } as unknown as Mocked<Config>;
       const mockMessageBus = {
@@ -408,6 +424,7 @@ describe('policy.ts', () => {
 
     it('should handle MCP ProceedAlwaysAndSave (persist: true)', async () => {
       const mockConfig = {
+        getAutoAddPolicy: vi.fn().mockReturnValue(false),
         setApprovalMode: vi.fn(),
       } as unknown as Mocked<Config>;
       const mockMessageBus = {
