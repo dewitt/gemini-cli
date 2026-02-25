@@ -20,6 +20,8 @@ import {
   homedir,
   SandboxOrchestrator,
   LOCAL_DEV_SANDBOX_IMAGE_NAME,
+  SANDBOX_NETWORK_NAME,
+  SANDBOX_PROXY_NAME,
 } from '@google/gemini-cli-core';
 import { ConsolePatcher } from '../ui/utils/ConsolePatcher.js';
 import { randomBytes } from 'node:crypto';
@@ -29,8 +31,6 @@ import {
   parseImageName,
   ports,
   entrypoint,
-  SANDBOX_NETWORK_NAME,
-  SANDBOX_PROXY_NAME,
   BUILTIN_SEATBELT_PROFILES,
 } from './sandboxUtils.js';
 

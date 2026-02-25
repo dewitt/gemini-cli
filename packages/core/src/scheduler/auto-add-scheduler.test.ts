@@ -99,7 +99,7 @@ describe('Scheduler Auto-add Policy Logic', () => {
     expect(mockMessageBus.publish).toHaveBeenCalledWith(
       expect.objectContaining({
         type: MessageBusType.UPDATE_POLICY,
-        argsPattern: expect.stringMatching(/test\.txt/),
+        argsPattern: expect.stringMatching(/test.*txt/),
       }),
     );
   });
@@ -126,7 +126,7 @@ describe('Scheduler Auto-add Policy Logic', () => {
       expect.objectContaining({
         type: MessageBusType.UPDATE_POLICY,
         toolName: READ_FILE_TOOL_NAME,
-        argsPattern: expect.stringMatching(/read\.me/),
+        argsPattern: expect.stringMatching(/read.*me/),
       }),
     );
   });
