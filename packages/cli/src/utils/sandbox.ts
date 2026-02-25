@@ -4,13 +4,12 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { exec, execSync, spawn, type ChildProcess } from 'node:child_process';
+import { execSync, spawn, type ChildProcess } from 'node:child_process';
 import path from 'node:path';
 import fs from 'node:fs';
 import os from 'node:os';
 import { fileURLToPath } from 'node:url';
 import { quote } from 'shell-quote';
-import { promisify } from 'node:util';
 import type { Config, SandboxConfig } from '@google/gemini-cli-core';
 import {
   coreEvents,
@@ -22,6 +21,7 @@ import {
   LOCAL_DEV_SANDBOX_IMAGE_NAME,
   SANDBOX_NETWORK_NAME,
   SANDBOX_PROXY_NAME,
+  spawnAsync,
 } from '@google/gemini-cli-core';
 import { ConsolePatcher } from '../ui/utils/ConsolePatcher.js';
 import { randomBytes } from 'node:crypto';
@@ -33,8 +33,6 @@ import {
   entrypoint,
   BUILTIN_SEATBELT_PROFILES,
 } from './sandboxUtils.js';
-
-const execAsync = promisify(exec);
 
 export async function start_sandbox(
   config: SandboxConfig,
@@ -85,7 +83,7 @@ export async function start_sandbox(
         '-D',
         `HOME_DIR=${fs.realpathSync(homedir())}`,
         '-D',
-        `CACHE_DIR=${fs.realpathSync((await execAsync('getconf DARWIN_USER_CACHE_DIR')).stdout.trim())}`,
+        `CACHE_DIR=${fs.realpathSync((await spawnAsync('getconf', ['DARWIN_USER_CACHE_DIR'])).stdout.trim())}`,
       ];
 
       // Add included directories from the workspace context
@@ -186,9 +184,17 @@ export async function start_sandbox(
           );
         });
         debugLogger.log('waiting for proxy to start ...');
-        await execAsync(
-          `until timeout 0.25 curl -s http://localhost:8877; do sleep 0.25; done`,
-        );
+        // Simple wait loop using spawnAsync
+        while (true) {
+          try {
+            await spawnAsync('curl', ['-s', 'http://localhost:8877'], {
+              timeout: 250,
+            });
+            break;
+          } catch {
+            await new Promise((r) => setTimeout(r, 250));
+          }
+        }
       }
       // spawn child and let it inherit stdio
       process.stdin.pause();
@@ -410,17 +416,38 @@ export async function start_sandbox(
 
       // if using proxy, switch to internal networking through proxy
       if (proxy) {
-        execSync(
-          `${config.command} network inspect ${SANDBOX_NETWORK_NAME} || ${config.command} network create --internal ${SANDBOX_NETWORK_NAME}`,
-        );
+        try {
+          await spawnAsync(config.command, [
+            'network',
+            'inspect',
+            SANDBOX_NETWORK_NAME,
+          ]);
+        } catch {
+          await spawnAsync(config.command, [
+            'network',
+            'create',
+            '--internal',
+            SANDBOX_NETWORK_NAME,
+          ]);
+        }
         args.push('--network', SANDBOX_NETWORK_NAME);
         // if proxy command is set, create a separate network w/ host access (i.e. non-internal)
         // we will run proxy in its own container connected to both host network and internal network
         // this allows proxy to work even on rootless podman on macos with host<->vm<->container isolation
         if (proxyCommand) {
-          execSync(
-            `${config.command} network inspect ${SANDBOX_PROXY_NAME} || ${config.command} network create ${SANDBOX_PROXY_NAME}`,
-          );
+          try {
+            await spawnAsync(config.command, [
+              'network',
+              'inspect',
+              SANDBOX_PROXY_NAME,
+            ]);
+          } catch {
+            await spawnAsync(config.command, [
+              'network',
+              'create',
+              SANDBOX_PROXY_NAME,
+            ]);
+          }
         }
       }
     }
@@ -437,9 +464,12 @@ export async function start_sandbox(
       debugLogger.log(`ContainerName: ${containerName}`);
     } else {
       let index = 0;
-      const containerNameCheck = (
-        await execAsync(`${config.command} ps -a --format "{{.Names}}"`)
-      ).stdout.trim();
+      const { stdout: containerNameCheck } = await spawnAsync(config.command, [
+        'ps',
+        '-a',
+        '--format',
+        '{{.Names}}',
+      ]);
       while (containerNameCheck.includes(`${imageName}-${index}`)) {
         index++;
       }
@@ -607,8 +637,8 @@ export async function start_sandbox(
       // The entrypoint script then handles dropping privileges to the correct user.
       args.push('--user', 'root');
 
-      const uid = (await execAsync('id -u')).stdout.trim();
-      const gid = (await execAsync('id -g')).stdout.trim();
+      const uid = (await spawnAsync('id', ['-u'])).stdout.trim();
+      const gid = (await spawnAsync('id', ['-g'])).stdout.trim();
 
       // Instead of passing --user to the main sandbox container, we let it
       // start as root, then create a user with the host's UID/GID, and
@@ -661,7 +691,9 @@ export async function start_sandbox(
       // install handlers to stop proxy on exit/signal
       const stopProxy = () => {
         debugLogger.log('stopping proxy container ...');
-        execSync(`${config.command} rm -f ${SANDBOX_PROXY_NAME}`);
+        spawnAsync(config.command, ['rm', '-f', SANDBOX_PROXY_NAME]).catch(
+          () => {},
+        );
       };
       process.off('exit', stopProxy);
       process.on('exit', stopProxy);
@@ -682,18 +714,29 @@ export async function start_sandbox(
           process.kill(-sandboxProcess.pid, 'SIGTERM');
         }
         throw new FatalSandboxError(
-          `Proxy container command '${proxyContainerCommand}' exited with code ${code}, signal ${signal}`,
+          `Proxy container command exited with code ${code}, signal ${signal}`,
         );
       });
       debugLogger.log('waiting for proxy to start ...');
-      await execAsync(
-        `until timeout 0.25 curl -s http://localhost:8877; do sleep 0.25; done`,
-      );
+      // Simple wait loop using spawnAsync
+      while (true) {
+        try {
+          await spawnAsync('curl', ['-s', 'http://localhost:8877'], {
+            timeout: 250,
+          });
+          break;
+        } catch {
+          await new Promise((r) => setTimeout(r, 250));
+        }
+      }
       // connect proxy container to sandbox network
       // (workaround for older versions of docker that don't support multiple --network args)
-      await execAsync(
-        `${config.command} network connect ${SANDBOX_NETWORK_NAME} ${SANDBOX_PROXY_NAME}`,
-      );
+      await spawnAsync(config.command, [
+        'network',
+        'connect',
+        SANDBOX_NETWORK_NAME,
+        SANDBOX_PROXY_NAME,
+      ]);
     }
 
     // spawn child and let it inherit stdio

@@ -4,7 +4,6 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { spawn } from 'node:child_process';
 import { parse } from 'shell-quote';
 import type { Config, SandboxConfig } from '../config/config.js';
 import {
@@ -12,6 +11,7 @@ import {
   debugLogger,
   LOCAL_DEV_SANDBOX_IMAGE_NAME,
 } from '../index.js';
+import { spawnAsync } from './shell-utils.js';
 
 /**
  * Orchestrates sandbox image management and command construction.
@@ -86,30 +86,15 @@ export class SandboxOrchestrator {
     sandbox: string,
     image: string,
   ): Promise<boolean> {
-    return new Promise((resolve) => {
-      const args = ['images', '-q', image];
-      const checkProcess = spawn(sandbox, args);
-
-      let stdoutData = '';
-      if (checkProcess.stdout) {
-        checkProcess.stdout.on('data', (data) => {
-          stdoutData += data.toString();
-        });
-      }
-
-      checkProcess.on('error', (err) => {
-        debugLogger.warn(
-          `Failed to start '${sandbox}' command for image check: ${err.message}`,
-        );
-        resolve(false);
-      });
-
-      checkProcess.on('close', (_code) => {
-        // Non-zero code might indicate docker daemon not running, etc.
-        // The primary success indicator is non-empty stdoutData.
-        resolve(stdoutData.trim() !== '');
-      });
-    });
+    try {
+      const { stdout } = await spawnAsync(sandbox, ['images', '-q', image]);
+      return stdout.trim() !== '';
+    } catch (err) {
+      debugLogger.warn(
+        `Failed to check image existence with '${sandbox}': ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return false;
+    }
   }
 
   private static async pullImage(
@@ -118,65 +103,21 @@ export class SandboxOrchestrator {
     cliConfig?: Config,
   ): Promise<boolean> {
     debugLogger.debug(`Attempting to pull image ${image} using ${sandbox}...`);
-    return new Promise((resolve) => {
-      const args = ['pull', image];
-      const pullProcess = spawn(sandbox, args, { stdio: 'pipe' });
-
-      let _stderrData = '';
-
-      const onStdoutData = (data: Buffer) => {
-        if (cliConfig?.getDebugMode() || process.env['DEBUG']) {
-          debugLogger.log(data.toString().trim()); // Show pull progress
-        }
-      };
-
-      const onStderrData = (data: Buffer) => {
-        _stderrData += data.toString();
-        // eslint-disable-next-line no-console
-        console.error(data.toString().trim()); // Show pull errors/info from the command itself
-      };
-
-      const onError = (err: Error) => {
-        debugLogger.warn(
-          `Failed to start '${sandbox} pull ${image}' command: ${err.message}`,
-        );
-        cleanup();
-        resolve(false);
-      };
-
-      const onClose = (code: number | null) => {
-        if (code === 0) {
-          debugLogger.log(`Successfully pulled image ${image}.`);
-          cleanup();
-          resolve(true);
-        } else {
-          debugLogger.warn(
-            `Failed to pull image ${image}. '${sandbox} pull ${image}' exited with code ${code}.`,
-          );
-          cleanup();
-          resolve(false);
-        }
-      };
-
-      const cleanup = () => {
-        if (pullProcess.stdout) {
-          pullProcess.stdout.removeListener('data', onStdoutData);
-        }
-        if (pullProcess.stderr) {
-          pullProcess.stderr.removeListener('data', onStderrData);
-        }
-        pullProcess.removeListener('error', onError);
-        pullProcess.removeListener('close', onClose);
-      };
-
-      if (pullProcess.stdout) {
-        pullProcess.stdout.on('data', onStdoutData);
+    try {
+      // Note: spawnAsync currently buffers stdout/stderr which means we won't see
+      // real-time progress, but it's consistent with our rules.
+      // If real-time progress is critical, we might need a streaming version of spawnAsync.
+      const { stdout } = await spawnAsync(sandbox, ['pull', image]);
+      if (cliConfig?.getDebugMode() || process.env['DEBUG']) {
+        debugLogger.log(stdout.trim());
       }
-      if (pullProcess.stderr) {
-        pullProcess.stderr.on('data', onStderrData);
-      }
-      pullProcess.on('error', onError);
-      pullProcess.on('close', onClose);
-    });
+      debugLogger.log(`Successfully pulled image ${image}.`);
+      return true;
+    } catch (err) {
+      debugLogger.warn(
+        `Failed to pull image ${image}: ${err instanceof Error ? err.message : String(err)}`,
+      );
+      return false;
+    }
   }
 }

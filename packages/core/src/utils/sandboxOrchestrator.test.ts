@@ -5,12 +5,13 @@
  */
 
 import { vi, describe, it, expect, beforeEach } from 'vitest';
-import { spawn } from 'node:child_process';
 import { SandboxOrchestrator } from './sandboxOrchestrator.js';
-import { EventEmitter } from 'node:events';
 import type { SandboxConfig } from '../config/config.js';
+import { spawnAsync } from './shell-utils.js';
 
-vi.mock('node:child_process');
+vi.mock('./shell-utils.js', () => ({
+  spawnAsync: vi.fn(),
+}));
 vi.mock('../index.js', async (importOriginal) => {
   const actual = await importOriginal<typeof import('../index.js')>();
   return {
@@ -109,21 +110,54 @@ describe('SandboxOrchestrator', () => {
         'user=test-value',
       ]);
     });
+
+    it('should handle complex quoted flags', () => {
+      const config: SandboxConfig = {
+        command: 'docker',
+        image: 'some-image',
+        flags: '--env "FOO=bar baz" --label \'key=val with spaces\'',
+      };
+      const args = SandboxOrchestrator.getContainerRunArgs(config, '/work');
+      expect(args).toEqual([
+        'run',
+        '-i',
+        '--rm',
+        '--init',
+        '--workdir',
+        '/work',
+        '--env',
+        'FOO=bar baz',
+        '--label',
+        'key=val with spaces',
+      ]);
+    });
+
+    it('should filter out non-string shell-quote Op objects', () => {
+      const config: SandboxConfig = {
+        command: 'docker',
+        image: 'some-image',
+        flags: '--flag > /tmp/out', // shell-quote would return { op: '>' }
+      };
+      const args = SandboxOrchestrator.getContainerRunArgs(config, '/work');
+      expect(args).toEqual([
+        'run',
+        '-i',
+        '--rm',
+        '--init',
+        '--workdir',
+        '/work',
+        '--flag',
+        '/tmp/out',
+      ]);
+      // Note: shell-quote filters out the '>' op but keeps the surrounding strings
+    });
   });
 
   describe('ensureSandboxImageIsPresent', () => {
     it('should return true if image exists locally', async () => {
-      interface MockProcessWithStdout extends EventEmitter {
-        stdout: EventEmitter;
-      }
-      const mockImageCheckProcess = new EventEmitter() as MockProcessWithStdout;
-      mockImageCheckProcess.stdout = new EventEmitter();
-      vi.mocked(spawn).mockImplementationOnce(() => {
-        setTimeout(() => {
-          mockImageCheckProcess.stdout.emit('data', Buffer.from('image-id'));
-          mockImageCheckProcess.emit('close', 0);
-        }, 1);
-        return mockImageCheckProcess as unknown as ReturnType<typeof spawn>;
+      vi.mocked(spawnAsync).mockResolvedValueOnce({
+        stdout: 'image-id',
+        stderr: '',
       });
 
       const result = await SandboxOrchestrator.ensureSandboxImageIsPresent(
@@ -131,7 +165,7 @@ describe('SandboxOrchestrator', () => {
         'some-image',
       );
       expect(result).toBe(true);
-      expect(spawn).toHaveBeenCalledWith('docker', [
+      expect(spawnAsync).toHaveBeenCalledWith('docker', [
         'images',
         '-q',
         'some-image',
@@ -140,44 +174,16 @@ describe('SandboxOrchestrator', () => {
 
     it('should pull image if missing and return true on success', async () => {
       // 1. Image check fails (returns empty stdout)
-      interface MockProcessWithStdout extends EventEmitter {
-        stdout: EventEmitter;
-      }
-      const mockImageCheckProcess1 =
-        new EventEmitter() as MockProcessWithStdout;
-      mockImageCheckProcess1.stdout = new EventEmitter();
-      vi.mocked(spawn).mockImplementationOnce(() => {
-        setTimeout(() => {
-          mockImageCheckProcess1.emit('close', 0);
-        }, 1);
-        return mockImageCheckProcess1 as unknown as ReturnType<typeof spawn>;
-      });
-
+      vi.mocked(spawnAsync).mockResolvedValueOnce({ stdout: '', stderr: '' });
       // 2. Pull image succeeds
-      interface MockChildProcess extends EventEmitter {
-        stdout: EventEmitter;
-        stderr: EventEmitter;
-      }
-      const mockPullProcess = new EventEmitter() as MockChildProcess;
-      mockPullProcess.stdout = new EventEmitter();
-      mockPullProcess.stderr = new EventEmitter();
-      vi.mocked(spawn).mockImplementationOnce(() => {
-        setTimeout(() => {
-          mockPullProcess.emit('close', 0);
-        }, 1);
-        return mockPullProcess as unknown as ReturnType<typeof spawn>;
+      vi.mocked(spawnAsync).mockResolvedValueOnce({
+        stdout: 'Successfully pulled',
+        stderr: '',
       });
-
       // 3. Image check succeeds
-      const mockImageCheckProcess2 =
-        new EventEmitter() as MockProcessWithStdout;
-      mockImageCheckProcess2.stdout = new EventEmitter();
-      vi.mocked(spawn).mockImplementationOnce(() => {
-        setTimeout(() => {
-          mockImageCheckProcess2.stdout.emit('data', Buffer.from('image-id'));
-          mockImageCheckProcess2.emit('close', 0);
-        }, 1);
-        return mockImageCheckProcess2 as unknown as ReturnType<typeof spawn>;
+      vi.mocked(spawnAsync).mockResolvedValueOnce({
+        stdout: 'image-id',
+        stderr: '',
       });
 
       const result = await SandboxOrchestrator.ensureSandboxImageIsPresent(
@@ -185,42 +191,14 @@ describe('SandboxOrchestrator', () => {
         'some-image',
       );
       expect(result).toBe(true);
-      expect(spawn).toHaveBeenCalledWith(
-        'docker',
-        ['pull', 'some-image'],
-        expect.any(Object),
-      );
+      expect(spawnAsync).toHaveBeenCalledWith('docker', ['pull', 'some-image']);
     });
 
     it('should return false if image pull fails', async () => {
       // 1. Image check fails
-      interface MockProcessWithStdout extends EventEmitter {
-        stdout: EventEmitter;
-      }
-      const mockImageCheckProcess1 =
-        new EventEmitter() as MockProcessWithStdout;
-      mockImageCheckProcess1.stdout = new EventEmitter();
-      vi.mocked(spawn).mockImplementationOnce(() => {
-        setTimeout(() => {
-          mockImageCheckProcess1.emit('close', 0);
-        }, 1);
-        return mockImageCheckProcess1 as unknown as ReturnType<typeof spawn>;
-      });
-
+      vi.mocked(spawnAsync).mockResolvedValueOnce({ stdout: '', stderr: '' });
       // 2. Pull image fails
-      interface MockChildProcess extends EventEmitter {
-        stdout: EventEmitter;
-        stderr: EventEmitter;
-      }
-      const mockPullProcess = new EventEmitter() as MockChildProcess;
-      mockPullProcess.stdout = new EventEmitter();
-      mockPullProcess.stderr = new EventEmitter();
-      vi.mocked(spawn).mockImplementationOnce(() => {
-        setTimeout(() => {
-          mockPullProcess.emit('close', 1);
-        }, 1);
-        return mockPullProcess as unknown as ReturnType<typeof spawn>;
-      });
+      vi.mocked(spawnAsync).mockRejectedValueOnce(new Error('Pull failed'));
 
       const result = await SandboxOrchestrator.ensureSandboxImageIsPresent(
         'docker',

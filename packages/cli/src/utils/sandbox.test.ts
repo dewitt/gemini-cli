@@ -5,7 +5,7 @@
  */
 
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { spawn, exec, execSync } from 'node:child_process';
+import { spawn, execSync } from 'node:child_process';
 import os from 'node:os';
 import fs from 'node:fs';
 import { start_sandbox } from './sandbox.js';
@@ -32,32 +32,6 @@ vi.mock('./sandboxUtils.js', async (importOriginal) => {
 vi.mock('node:child_process');
 vi.mock('node:os');
 vi.mock('node:fs');
-vi.mock('node:util', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('node:util')>();
-  return {
-    ...actual,
-    promisify: (fn: (...args: unknown[]) => unknown) => {
-      if (fn === exec) {
-        return async (cmd: string) => {
-          if (cmd === 'id -u' || cmd === 'id -g') {
-            return { stdout: '1000', stderr: '' };
-          }
-          if (cmd.includes('curl')) {
-            return { stdout: '', stderr: '' };
-          }
-          if (cmd.includes('getconf DARWIN_USER_CACHE_DIR')) {
-            return { stdout: '/tmp/cache', stderr: '' };
-          }
-          if (cmd.includes('ps -a --format')) {
-            return { stdout: 'existing-container', stderr: '' };
-          }
-          return { stdout: '', stderr: '' };
-        };
-      }
-      return actual.promisify(fn);
-    },
-  };
-});
 
 vi.mock('@google/gemini-cli-core', async (importOriginal) => {
   const actual =
@@ -78,6 +52,16 @@ vi.mock('@google/gemini-cli-core', async (importOriginal) => {
         .fn()
         .mockReturnValue(['run', '-i', '--rm', '--init']),
     },
+    spawnAsync: vi.fn().mockImplementation(async (cmd, args) => {
+      if (cmd === 'id' && args?.[0] === '-u')
+        return { stdout: '1000', stderr: '' };
+      if (cmd === 'id' && args?.[0] === '-g')
+        return { stdout: '1000', stderr: '' };
+      if (cmd === 'getconf') return { stdout: '/tmp/cache', stderr: '' };
+      if (cmd === 'docker' && args?.[0] === 'ps')
+        return { stdout: 'existing-container', stderr: '' };
+      return { stdout: '', stderr: '' };
+    }),
     LOCAL_DEV_SANDBOX_IMAGE_NAME: 'gemini-cli-sandbox',
     homedir: mockedHomedir,
   };
@@ -248,6 +232,62 @@ describe('sandbox', () => {
         config,
         expect.any(String),
         undefined, // SANDBOX_FLAGS env var is not set
+      );
+    });
+
+    it('should expand multiple environment variables in sandbox flags', async () => {
+      process.env['VAR1'] = 'val1';
+      process.env['VAR2'] = 'val2';
+      const config: SandboxConfig = {
+        command: 'docker',
+        image: 'gemini-cli-sandbox',
+        flags: '--env V1=$VAR1 --env V2=${VAR2}',
+      };
+
+      const mockSpawnProcess = new EventEmitter() as unknown as ReturnType<
+        typeof spawn
+      >;
+      mockSpawnProcess.on = vi.fn().mockImplementation((event, cb) => {
+        if (event === 'close') {
+          setTimeout(() => cb(0), 10);
+        }
+        return mockSpawnProcess;
+      });
+      vi.mocked(spawn).mockImplementationOnce(() => mockSpawnProcess);
+
+      await start_sandbox(config);
+
+      expect(SandboxOrchestrator.getContainerRunArgs).toHaveBeenCalledWith(
+        config,
+        expect.any(String),
+        undefined,
+      );
+    });
+
+    it('should handle quoted strings in sandbox flags', async () => {
+      const config: SandboxConfig = {
+        command: 'docker',
+        image: 'gemini-cli-sandbox',
+        flags: '--label "description=multi word label" --env \'FOO=bar baz\'',
+      };
+
+      const mockSpawnProcess = new EventEmitter() as unknown as ReturnType<
+        typeof spawn
+      >;
+      mockSpawnProcess.on = vi.fn().mockImplementation((event, cb) => {
+        if (event === 'close') {
+          setTimeout(() => cb(0), 10);
+        }
+        return mockSpawnProcess;
+      });
+      vi.mocked(spawn).mockImplementationOnce(() => mockSpawnProcess);
+
+      await start_sandbox(config);
+
+      expect(SandboxOrchestrator.getContainerRunArgs).toHaveBeenCalledWith(
+        config,
+        expect.any(String),
+        undefined,
       );
     });
 
