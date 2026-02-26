@@ -49,7 +49,7 @@ export const DEFAULT_MODEL_CONFIGS: ModelConfigServiceConfig = {
       modelConfig: {
         generateContentConfig: {
           thinkingConfig: {
-            thinkingLevel: ThinkingLevel.HIGH,
+            thinkingLevel: ThinkingLevel.MEDIUM,
           },
         },
       },

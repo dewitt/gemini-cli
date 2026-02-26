@@ -99,7 +99,7 @@ export const CodebaseInvestigatorAgent = (
         thinkingConfig: supportsModernFeatures(model)
           ? {
               includeThoughts: true,
-              thinkingLevel: ThinkingLevel.HIGH,
+              thinkingLevel: ThinkingLevel.MEDIUM,
             }
           : {
               includeThoughts: true,

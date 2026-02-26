@@ -435,7 +435,7 @@ their corresponding top-level category object in your `settings.json` file.
         "modelConfig": {
           "generateContentConfig": {
             "thinkingConfig": {
-              "thinkingLevel": "HIGH"
+              "thinkingLevel": "MEDIUM"
             }
           }
         }

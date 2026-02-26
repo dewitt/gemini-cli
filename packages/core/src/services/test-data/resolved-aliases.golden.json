@@ -32,7 +32,7 @@
       "topP": 0.95,
       "thinkingConfig": {
         "includeThoughts": true,
-        "thinkingLevel": "HIGH"
+        "thinkingLevel": "MEDIUM"
       },
       "topK": 64
     }
@@ -44,7 +44,7 @@
       "topP": 0.95,
       "thinkingConfig": {
         "includeThoughts": true,
-        "thinkingLevel": "HIGH"
+        "thinkingLevel": "MEDIUM"
       },
       "topK": 64
     }
@@ -56,7 +56,7 @@
       "topP": 0.95,
       "thinkingConfig": {
         "includeThoughts": true,
-        "thinkingLevel": "HIGH"
+        "thinkingLevel": "MEDIUM"
       },
       "topK": 64
     }

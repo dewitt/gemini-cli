@@ -170,7 +170,7 @@ describe('AgentRegistry', () => {
         investigatorDef?.modelConfig.generateContentConfig?.thinkingConfig,
       ).toStrictEqual({
         includeThoughts: true,
-        thinkingLevel: ThinkingLevel.HIGH,
+        thinkingLevel: ThinkingLevel.MEDIUM,
       });
     });
 

@@ -160,7 +160,7 @@ describe('GeminiChat', () => {
           const model = modelConfigKey.model ?? mockConfig.getModel();
           const thinkingConfig = model.startsWith('gemini-3')
             ? {
-                thinkingLevel: ThinkingLevel.HIGH,
+                thinkingLevel: ThinkingLevel.MEDIUM,
               }
             : {
                 thinkingBudget: DEFAULT_THINKING_MODE,
@@ -983,7 +983,7 @@ describe('GeminiChat', () => {
           config: expect.objectContaining({
             thinkingConfig: {
               thinkingBudget: undefined,
-              thinkingLevel: ThinkingLevel.HIGH,
+              thinkingLevel: ThinkingLevel.MEDIUM,
             },
           }),
         }),
