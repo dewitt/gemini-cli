@@ -326,7 +326,6 @@ async function calculateRegexReplacement(
     const matchNewlines = countNewlines(matchContent);
     matchRanges.push({ start: startLine, end: startLine + matchNewlines });
 
-    currentLine += matchNewlines;
     lastIndex = match.index + match[0].length;
   }
 

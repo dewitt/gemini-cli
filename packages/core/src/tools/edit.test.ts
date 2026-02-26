@@ -394,6 +394,42 @@ describe('EditTool', () => {
       ]);
     });
 
+    it('should not drift line numbers when there are many multi-line matches (regression)', async () => {
+      // Create a file with 10 matches separated by one line each.
+      // Line 1: header
+      // Line 2-3: match 1
+      // Line 4: gap
+      // Line 5-6: match 2
+      // ...
+      // Line 3*i - 1 to 3*i: match i
+      let content = 'header';
+      for (let i = 0; i < 10; i++) {
+        content += '\nmatch\nblock\ngap';
+      }
+
+      const result = await calculateReplacement(mockConfig, {
+        params: {
+          file_path: 'test.ts',
+          old_string: 'match\nblock',
+          new_string: 'replacement',
+          allow_multiple: true,
+        },
+        currentContent: content,
+        abortSignal,
+      });
+
+      expect(result.occurrences).toBe(10);
+      const expectedRanges = [];
+      for (let i = 0; i < 10; i++) {
+        // match 1 starts at line 2
+        // match 2 starts at line 5
+        // match 3 starts at line 8
+        const start = 2 + i * 3;
+        expectedRanges.push({ start, end: start + 1 });
+      }
+      expect(result.matchRanges).toEqual(expectedRanges);
+    });
+
     it('should correctly calculate matchRanges for flexible multi-line replacements', async () => {
       const content =
         '  line1\n  match\n  line\n  line3\n  match\n  line\n  line5';
