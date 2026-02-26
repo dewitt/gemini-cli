@@ -39,18 +39,6 @@ jobs:
           private-key: '${{ secrets.PRIVATE_KEY }}'
           permission-issues: 'write'
 
-      - name: 'Get issue from event'
-        if: |-
-          ${{ github.event_name == 'issues' }}
-        id: 'get_issue_from_event'
-        env:
-          ISSUE_EVENT: '${{ toJSON(github.event.issue) }}'
-        run: |
-          set -euo pipefail
-          ISSUE_JSON=$(echo "$ISSUE_EVENT" | jq -c '[{number: .number, title: .title, body: .body}]')
-          echo "issues_to_triage=${ISSUE_JSON}" >> "${GITHUB_OUTPUT}"
-          echo "✅ Found issue #${{ github.event.issue.number }} from event to triage! 🎯"
-
       - name: 'Find untriaged issues'
         if: |-
           ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' }}
@@ -67,10 +55,12 @@ jobs:
 
           ISSUES="${NO_AREA_ISSUES}"
 
-          echo '📝 Setting output for GitHub Actions...'
-          echo "issues_to_triage=${ISSUES}" >> "${GITHUB_OUTPUT}"
+          echo "${ISSUES}" > issues-to-triage.json
 
           ISSUE_COUNT="$(echo "${ISSUES}" | jq 'length')"
+          if [ "${ISSUE_COUNT}" -gt 0 ]; then
+            echo "has_issues=true" >> "${GITHUB_OUTPUT}"
+          fi
           echo "✅ Found ${ISSUE_COUNT} unique issues to triage! 🎯"
 
       - name: 'Get Repository Labels'
@@ -88,15 +78,24 @@ jobs:
             core.info(`Found ${labelNames.length} labels: ${labelNames.join(', ')}`);
             return labelNames;
 
+      - name: 'Prepare Issues for Event'
+        if: |-
+          ${{ github.event_name == 'issues' }}
+        id: 'prepare_event_issue'
+        env:
+          ISSUE_EVENT: '${{ toJSON(github.event.issue) }}'
+        run: |
+          echo "$ISSUE_EVENT" | jq -c '[{number: .number, title: .title, body: .body}]' > issues-to-triage.json
+          echo "has_issues=true" >> "${GITHUB_OUTPUT}"
+
       - name: 'Run Gemini Issue Analysis'
         if: |-
-          (steps.get_issue_from_event.outputs.issues_to_triage != '' && steps.get_issue_from_event.outputs.issues_to_triage != '[]') ||
-          (steps.find_issues.outputs.issues_to_triage != '' && steps.find_issues.outputs.issues_to_triage != '[]')
+          ${{ steps.find_issues.outputs.has_issues == 'true' || steps.prepare_event_issue.outputs.has_issues == 'true' }}
         uses: 'google-github-actions/run-gemini-cli@v0'
         id: 'gemini_issue_analysis'
         env:
           GITHUB_TOKEN: '' # Do not pass any auth token here since this runs on untrusted inputs
-          ISSUES_TO_TRIAGE: '${{ steps.get_issue_from_event.outputs.issues_to_triage || steps.find_issues.outputs.issues_to_triage }}'
+          ISSUES_FILE: 'issues-to-triage.json'
           REPOSITORY: '${{ github.repository }}'
           AVAILABLE_LABELS: '${{ steps.get_labels.outputs.available_labels }}'
         with:
@@ -111,6 +110,7 @@ jobs:
             {
               "maxSessionTurns": 25,
               "coreTools": [
+                "run_shell_command(cat)",
                 "run_shell_command(echo)"
               ],
               "telemetry": {

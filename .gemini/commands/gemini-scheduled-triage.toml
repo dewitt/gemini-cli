@@ -9,8 +9,9 @@ based on the definitions provided.
 ## Steps
 1.  **Initialize Expertise:** Call `activate_skill(name="issue-triage")` to load
     area definitions and classification logic.
-2.  **Gather Context:** Review the batch of issues to triage provided in
-    the `$ISSUES_TO_TRIAGE` environment variable (JSON array).
+2.  **Gather Context:** Read the batch of issues to triage from the file
+    provided in the `$ISSUES_FILE` environment variable. Use 
+    `run_shell_command(cat $ISSUES_FILE)` to get the content (JSON array).
 3.  **Check Labels:** Review the available labels: !{echo $AVAILABLE_LABELS}.
 4.  **Triage Batch:** For each issue in the batch, follow the instructions in 
     the `issue-triage` skill to select exactly one `area/` label.
