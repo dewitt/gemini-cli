@@ -331,15 +331,13 @@ Important Rules:
     return toolsList;
   }
 
-  private emitActivity(
-    type: SubagentActivityEvent['type'],
-    data: Record<string, unknown>,
-  ) {
+  private emitActivity(type: string, data: Record<string, unknown>) {
     if (!this.onActivity) return;
     this.onActivity({
       isSubagentActivityEvent: true,
       agentName: this.definition.name,
-      type,
+      // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-assignment
+      type: type as any,
       data,
     });
   }
