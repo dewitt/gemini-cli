@@ -114,25 +114,42 @@ export class BrowserAgentInvocation extends BaseToolInvocation<
       }
 
       // Create activity callback for streaming output
-      const onActivity = (activity: SubagentActivityEvent): void => {
-        if (!updateOutput) return;
-
-        if (
-          activity.type === 'THOUGHT_CHUNK' &&
-          typeof activity.data['text'] === 'string'
-        ) {
-          updateOutput(`🌐💭 ${activity.data['text']}`);
-        }
+      const onActivity = (_activity: SubagentActivityEvent): void => {
+        // We'll let the generator loop handle thoughts now.
       };
 
       // Create and run executor with the configured definition
-      const executor = await LocalAgentExecutor.create(
+      const agent = await LocalAgentExecutor.create(
         definition,
         this.config,
         onActivity,
       );
 
-      const output = await executor.run(this.params, signal);
+      const stream = agent.runEphemeral(this.params, { signal });
+      let output;
+
+      for await (const event of stream) {
+        if (event.type === 'thought' && updateOutput) {
+          updateOutput(`🌐💭 ${event.content}`);
+        } else if (event.type === 'finished') {
+          if (
+            event.output &&
+            typeof event.output === 'object' &&
+            'terminate_reason' in event.output &&
+            'result' in event.output
+          ) {
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+            output = event.output as {
+              terminate_reason: string;
+              result: string;
+            };
+          }
+        }
+      }
+
+      if (!output) {
+        throw new Error('Browser agent stream ended without a final result.');
+      }
 
       const resultContent = `Browser agent finished.
 Termination Reason: ${output.terminate_reason}

@@ -424,7 +424,7 @@ describe('LocalAgentExecutor', () => {
         mockConfig,
         onActivity,
       );
-      await executor.run(inputs, signal);
+      await executor.runLegacy(inputs, signal);
 
       const chatConstructorArgs = MockedGeminiChat.mock.calls[0];
       const startHistory = chatConstructorArgs[3]; // history is the 4th arg
@@ -573,7 +573,7 @@ describe('LocalAgentExecutor', () => {
       );
 
       // Run without inputs to trigger validation error
-      await expect(executor.run({}, signal)).rejects.toThrow(
+      await expect(executor.runLegacy({}, signal)).rejects.toThrow(
         /Missing required input parameters/,
       );
 
@@ -644,7 +644,7 @@ describe('LocalAgentExecutor', () => {
         'T2: Done',
       );
 
-      const output = await executor.run(inputs, signal);
+      const output = await executor.runLegacy(inputs, signal);
 
       expect(mockSendMessageStream).toHaveBeenCalledTimes(2);
 
@@ -794,7 +794,7 @@ describe('LocalAgentExecutor', () => {
         'Task finished.',
       );
 
-      const output = await executor.run({ goal: 'Do work' }, signal);
+      const output = await executor.runLegacy({ goal: 'Do work' }, signal);
 
       const { modelConfigKey } = getMockMessageParams(0);
       expect(modelConfigKey.model).toBe(getModelConfigAlias(definition));
@@ -864,7 +864,7 @@ describe('LocalAgentExecutor', () => {
       // Turn 3 (recovery turn - also fails)
       mockModelResponse([], 'I still give up.');
 
-      const output = await executor.run({ goal: 'Strict test' }, signal);
+      const output = await executor.runLegacy({ goal: 'Strict test' }, signal);
 
       expect(mockSendMessageStream).toHaveBeenCalledTimes(3);
 
@@ -920,7 +920,7 @@ describe('LocalAgentExecutor', () => {
         },
       ]);
 
-      const output = await executor.run({ goal: 'Error test' }, signal);
+      const output = await executor.runLegacy({ goal: 'Error test' }, signal);
 
       expect(mockSendMessageStream).toHaveBeenCalledTimes(2);
 
@@ -979,7 +979,7 @@ describe('LocalAgentExecutor', () => {
         },
       ]);
 
-      const output = await executor.run({ goal: 'Dup test' }, signal);
+      const output = await executor.runLegacy({ goal: 'Dup test' }, signal);
 
       expect(mockSendMessageStream).toHaveBeenCalledTimes(1);
       expect(output.terminate_reason).toBe(AgentTerminateMode.GOAL);
@@ -1073,7 +1073,7 @@ describe('LocalAgentExecutor', () => {
         },
       ]);
 
-      const runPromise = executor.run({ goal: 'Parallel' }, signal);
+      const runPromise = executor.runLegacy({ goal: 'Parallel' }, signal);
 
       await vi.advanceTimersByTimeAsync(1);
       await bothStarted;
@@ -1133,7 +1133,7 @@ describe('LocalAgentExecutor', () => {
         .spyOn(debugLogger, 'warn')
         .mockImplementation(() => {});
 
-      await executor.run({ goal: 'Sec test' }, signal);
+      await executor.runLegacy({ goal: 'Sec test' }, signal);
 
       // Verify external executor was not called (Security held)
       expect(mockScheduleAgentTools).not.toHaveBeenCalled();
@@ -1205,7 +1205,10 @@ describe('LocalAgentExecutor', () => {
         },
       ]);
 
-      const output = await executor.run({ goal: 'Validation test' }, signal);
+      const output = await executor.runLegacy(
+        { goal: 'Validation test' },
+        signal,
+      );
 
       expect(mockSendMessageStream).toHaveBeenCalledTimes(2);
 
@@ -1256,7 +1259,9 @@ describe('LocalAgentExecutor', () => {
         onActivity,
       );
 
-      await expect(executor.run({ goal: 'test' }, signal)).rejects.toThrow(
+      await expect(
+        executor.runLegacy({ goal: 'test' }, signal),
+      ).rejects.toThrow(
         `Failed to create chat object: ${getErrorMessage(initError)}`,
       );
 
@@ -1332,7 +1337,10 @@ describe('LocalAgentExecutor', () => {
         },
       ]);
 
-      const output = await executor.run({ goal: 'Tool failure test' }, signal);
+      const output = await executor.runLegacy(
+        { goal: 'Tool failure test' },
+        signal,
+      );
 
       expect(mockScheduleAgentTools).toHaveBeenCalledTimes(1);
       expect(mockSendMessageStream).toHaveBeenCalledTimes(2);
@@ -1407,7 +1415,7 @@ describe('LocalAgentExecutor', () => {
         },
       ]);
 
-      await executor.run({ goal: 'test' }, signal);
+      await executor.runLegacy({ goal: 'test' }, signal);
 
       expect(mockRouter.route).toHaveBeenCalled();
       expect(mockSendMessageStream).toHaveBeenCalledWith(
@@ -1453,7 +1461,7 @@ describe('LocalAgentExecutor', () => {
         },
       ]);
 
-      await executor.run({ goal: 'test' }, signal);
+      await executor.runLegacy({ goal: 'test' }, signal);
 
       expect(mockRouter.route).not.toHaveBeenCalled();
       expect(mockSendMessageStream).toHaveBeenCalledWith(
@@ -1507,7 +1515,7 @@ describe('LocalAgentExecutor', () => {
       // Recovery turn
       mockModelResponse([], 'I give up');
 
-      const output = await executor.run({ goal: 'Turns test' }, signal);
+      const output = await executor.runLegacy({ goal: 'Turns test' }, signal);
 
       expect(output.terminate_reason).toBe(AgentTerminateMode.MAX_TURNS);
       expect(mockSendMessageStream).toHaveBeenCalledTimes(MAX + 1);
@@ -1543,7 +1551,7 @@ describe('LocalAgentExecutor', () => {
       // Recovery turn
       mockModelResponse([], 'I give up');
 
-      const runPromise = executor.run({ goal: 'Timeout test' }, signal);
+      const runPromise = executor.runLegacy({ goal: 'Timeout test' }, signal);
 
       // Advance time past the timeout to trigger the abort.
       await vi.advanceTimersByTimeAsync(31 * 1000);
@@ -1610,7 +1618,7 @@ describe('LocalAgentExecutor', () => {
       // Recovery turn
       mockModelResponse([], 'I give up');
 
-      const output = await executor.run({ goal: 'Timeout test' }, signal);
+      const output = await executor.runLegacy({ goal: 'Timeout test' }, signal);
 
       expect(output.terminate_reason).toBe(AgentTerminateMode.TIMEOUT);
       expect(mockSendMessageStream).toHaveBeenCalledTimes(2);
@@ -1632,7 +1640,7 @@ describe('LocalAgentExecutor', () => {
         })(),
       );
 
-      const output = await executor.run({ goal: 'Abort test' }, signal);
+      const output = await executor.runLegacy({ goal: 'Abort test' }, signal);
 
       expect(output.terminate_reason).toBe(AgentTerminateMode.ABORTED);
     });
@@ -1693,7 +1701,10 @@ describe('LocalAgentExecutor', () => {
         'Recovering from max turns',
       );
 
-      const output = await executor.run({ goal: 'Turns recovery' }, signal);
+      const output = await executor.runLegacy(
+        { goal: 'Turns recovery' },
+        signal,
+      );
 
       expect(output.terminate_reason).toBe(AgentTerminateMode.GOAL);
       expect(output.result).toBe('Recovered!');
@@ -1732,7 +1743,7 @@ describe('LocalAgentExecutor', () => {
       // Recovery Turn (fails by calling no tools)
       mockModelResponse([], 'I give up again.');
 
-      const output = await executor.run(
+      const output = await executor.runLegacy(
         { goal: 'Turns recovery fail' },
         signal,
       );
@@ -1778,7 +1789,10 @@ describe('LocalAgentExecutor', () => {
         'My mistake, here is the completion.',
       );
 
-      const output = await executor.run({ goal: 'Violation recovery' }, signal);
+      const output = await executor.runLegacy(
+        { goal: 'Violation recovery' },
+        signal,
+      );
 
       expect(mockSendMessageStream).toHaveBeenCalledTimes(3);
       expect(output.terminate_reason).toBe(AgentTerminateMode.GOAL);
@@ -1811,7 +1825,7 @@ describe('LocalAgentExecutor', () => {
       // Turn 3: Recovery turn (fails again)
       mockModelResponse([], 'I still dont know what to do.');
 
-      const output = await executor.run(
+      const output = await executor.runLegacy(
         { goal: 'Violation recovery fail' },
         signal,
       );
@@ -1871,7 +1885,10 @@ describe('LocalAgentExecutor', () => {
         'Apologies for the delay, finishing up.',
       );
 
-      const runPromise = executor.run({ goal: 'Timeout recovery' }, signal);
+      const runPromise = executor.runLegacy(
+        { goal: 'Timeout recovery' },
+        signal,
+      );
 
       // Advance time past the timeout to trigger the abort and recovery.
       await vi.advanceTimersByTimeAsync(31 * 1000);
@@ -1927,7 +1944,7 @@ describe('LocalAgentExecutor', () => {
           })(),
       );
 
-      const runPromise = executor.run(
+      const runPromise = executor.runLegacy(
         { goal: 'Timeout recovery fail' },
         signal,
       );
@@ -2002,7 +2019,7 @@ describe('LocalAgentExecutor', () => {
       // Recovery Turn (fails by calling no tools)
       mockModelResponse([], 'I give up again.');
 
-      await executor.run({ goal: 'Turns recovery fail' }, signal);
+      await executor.runLegacy({ goal: 'Turns recovery fail' }, signal);
 
       expect(mockedLogRecoveryAttempt).toHaveBeenCalledTimes(1);
       const recoveryEvent = mockedLogRecoveryAttempt.mock.calls[0][1];
@@ -2036,7 +2053,7 @@ describe('LocalAgentExecutor', () => {
         'Recovering from max turns',
       );
 
-      await executor.run({ goal: 'Turns recovery success' }, signal);
+      await executor.runLegacy({ goal: 'Turns recovery success' }, signal);
 
       expect(mockedLogRecoveryAttempt).toHaveBeenCalledTimes(1);
       const recoveryEvent = mockedLogRecoveryAttempt.mock.calls[0][1];
@@ -2091,7 +2108,7 @@ describe('LocalAgentExecutor', () => {
           'T2: Done',
         );
 
-        const runPromise = executor.run({ goal: 'Hint test' }, signal);
+        const runPromise = executor.runLegacy({ goal: 'Hint test' }, signal);
 
         // Give the loop a chance to start and register the listener
         await vi.advanceTimersByTimeAsync(1);
@@ -2157,7 +2174,7 @@ describe('LocalAgentExecutor', () => {
           },
         ]);
 
-        await executor.run({ goal: 'Isolation test' }, signal);
+        await executor.runLegacy({ goal: 'Isolation test' }, signal);
 
         // The first call to sendMessageStream should NOT contain the legacy hint
         expect(mockSendMessageStream).toHaveBeenCalled();
@@ -2203,7 +2220,10 @@ describe('LocalAgentExecutor', () => {
         );
 
         // Start execution
-        const runPromise = executor.run({ goal: 'Mid-turn hint test' }, signal);
+        const runPromise = executor.runLegacy(
+          { goal: 'Mid-turn hint test' },
+          signal,
+        );
 
         // Small delay to ensure the run loop has reached the await and registered listener
         await vi.advanceTimersByTimeAsync(1);
@@ -2312,7 +2332,7 @@ describe('LocalAgentExecutor', () => {
         'T2',
       );
 
-      await executor.run({ goal: 'Compress test' }, signal);
+      await executor.runLegacy({ goal: 'Compress test' }, signal);
 
       expect(mockCompress).toHaveBeenCalledTimes(2);
     });
@@ -2345,7 +2365,7 @@ describe('LocalAgentExecutor', () => {
         'T1',
       );
 
-      await executor.run({ goal: 'Compress success' }, signal);
+      await executor.runLegacy({ goal: 'Compress success' }, signal);
 
       expect(mockCompress).toHaveBeenCalledTimes(1);
       expect(mockSetHistory).toHaveBeenCalledTimes(1);
@@ -2388,7 +2408,7 @@ describe('LocalAgentExecutor', () => {
         'T2',
       );
 
-      await executor.run({ goal: 'Compress fail' }, signal);
+      await executor.runLegacy({ goal: 'Compress fail' }, signal);
 
       expect(mockCompress).toHaveBeenCalledTimes(2);
       // First call, hasFailedCompressionAttempt is false
@@ -2443,7 +2463,7 @@ describe('LocalAgentExecutor', () => {
         'T3',
       );
 
-      await executor.run({ goal: 'Compress reset' }, signal);
+      await executor.runLegacy({ goal: 'Compress reset' }, signal);
 
       expect(mockCompress).toHaveBeenCalledTimes(3);
       // Call 1: hasFailed... is false
