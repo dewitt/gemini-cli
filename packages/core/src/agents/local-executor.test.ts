@@ -16,7 +16,7 @@ import {
   type Mock,
 } from 'vitest';
 import { debugLogger } from '../utils/debugLogger.js';
-import { LocalAgentExecutor, type ActivityCallback } from './local-executor.js';
+import { LocalAgentExecutor, type ActivityCallback, LegacyLoop } from './local-executor.js';
 import { makeFakeConfig } from '../test-utils/config.js';
 import { ToolRegistry } from '../tools/tool-registry.js';
 import { DiscoveredMCPTool } from '../tools/mcp-tool.js';
@@ -331,7 +331,7 @@ describe('LocalAgentExecutor', () => {
     );
 
     activities = [];
-    onActivity = (activity) => activities.push(activity);
+    onActivity = (activity: SubagentActivityEvent) => activities.push(activity);
     abortController = new AbortController();
     signal = abortController.signal;
   });
@@ -343,21 +343,21 @@ describe('LocalAgentExecutor', () => {
   describe('create (Initialization and Validation)', () => {
     it('should create successfully with allowed tools', async () => {
       const definition = createTestDefinition([LS_TOOL_NAME]);
-      const executor = await LocalAgentExecutor.create(
+      const executor = (await LocalAgentExecutor.create(
         definition,
         mockConfig,
         onActivity,
-      );
+      )) as LegacyLoop<any>;
       expect(executor).toBeInstanceOf(LocalAgentExecutor);
     });
 
     it('should allow any tool for experimentation (formerly SECURITY check)', async () => {
       const definition = createTestDefinition([MOCK_TOOL_NOT_ALLOWED.name]);
-      const executor = await LocalAgentExecutor.create(
+      const executor = (await LocalAgentExecutor.create(
         definition,
         mockConfig,
         onActivity,
-      );
+      )) as LegacyLoop<any>;
       expect(executor).toBeInstanceOf(LocalAgentExecutor);
     });
 
@@ -366,11 +366,11 @@ describe('LocalAgentExecutor', () => {
         LS_TOOL_NAME,
         READ_FILE_TOOL_NAME,
       ]);
-      const executor = await LocalAgentExecutor.create(
+      const executor = (await LocalAgentExecutor.create(
         definition,
         mockConfig,
         onActivity,
-      );
+      )) as LegacyLoop<any>;
 
       const agentRegistry = (executor as any)['toolRegistry'];
 
@@ -387,11 +387,11 @@ describe('LocalAgentExecutor', () => {
       mockedPromptIdContext.getStore.mockReturnValue(parentId);
 
       const definition = createTestDefinition();
-      const executor = await LocalAgentExecutor.create(
+      const executor = (await LocalAgentExecutor.create(
         definition,
         mockConfig,
         onActivity,
-      );
+      )) as LegacyLoop<any>;
 
       expect((executor as any)['agentId']).toMatch(
         new RegExp(`^${parentId}-${definition.name}-`),
@@ -418,12 +418,12 @@ describe('LocalAgentExecutor', () => {
         },
       ]);
 
-      const executor = await LocalAgentExecutor.create(
+      const executor = (await LocalAgentExecutor.create(
         definition,
         mockConfig,
         onActivity,
-      );
-      await (executor as any).runLegacy(inputs, signal);
+      )) as LegacyLoop<any>;
+      await executor.runLegacy(inputs, signal);
 
       const chatConstructorArgs = MockedGeminiChat.mock.calls[0];
       const startHistory = chatConstructorArgs[3]; // history is the 4th arg
@@ -451,11 +451,11 @@ describe('LocalAgentExecutor', () => {
       ).mockReturnValue([subAgentName]);
 
       const definition = createTestDefinition([LS_TOOL_NAME, subAgentName]);
-      const executor = await LocalAgentExecutor.create(
+      const executor = (await LocalAgentExecutor.create(
         definition,
         mockConfig,
         onActivity,
-      );
+      )) as LegacyLoop<any>;
 
       const agentRegistry = (executor as any)['toolRegistry'];
 
@@ -483,11 +483,11 @@ describe('LocalAgentExecutor', () => {
       const definition = createTestDefinition();
       definition.toolConfig = undefined;
 
-      const executor = await LocalAgentExecutor.create(
+      const executor = (await LocalAgentExecutor.create(
         definition,
         mockConfig,
         onActivity,
-      );
+      )) as LegacyLoop<any>;
 
       const agentRegistry = (executor as any)['toolRegistry'];
 
@@ -530,11 +530,11 @@ describe('LocalAgentExecutor', () => {
 
       // 1. Qualified name works and registers the tool (using qualified name)
       const definition = createTestDefinition([qualifiedName]);
-      const executor = await LocalAgentExecutor.create(
+      const executor = (await LocalAgentExecutor.create(
         definition,
         mockConfig,
         onActivity,
-      );
+      )) as LegacyLoop<any>;
 
       const agentRegistry = (executor as any)['toolRegistry'];
       // It should be registered as the qualified name
@@ -542,12 +542,12 @@ describe('LocalAgentExecutor', () => {
 
       // 2. Unqualified name for MCP tool now also works (and gets upgraded to qualified)
       const definition2 = createTestDefinition([toolName]);
-      const executor2 = await LocalAgentExecutor.create(
+      const executor2 = (await LocalAgentExecutor.create(
         definition2,
         mockConfig,
         onActivity,
-      );
-      const agentRegistry2 = (executor2 as any)['toolRegistry'];
+      )) as LegacyLoop<any>;
+      const agentRegistry2 = executor2['toolRegistry'];
       expect(agentRegistry2.getTool(qualifiedName)).toBeDefined();
 
       getToolSpy.mockRestore();
@@ -565,11 +565,11 @@ describe('LocalAgentExecutor', () => {
         },
         required: ['goal'],
       };
-      const executor = await LocalAgentExecutor.create(
+      const executor = (await LocalAgentExecutor.create(
         definition,
         mockConfig,
         onActivity,
-      );
+      )) as LegacyLoop<any>;
 
       // Run without inputs to trigger validation error
       await expect((executor as any).runLegacy({}, signal)).rejects.toThrow(
@@ -588,11 +588,11 @@ describe('LocalAgentExecutor', () => {
 
     it('should execute successfully when model calls complete_task with output (Happy Path with Output)', async () => {
       const definition = createTestDefinition();
-      const executor = await LocalAgentExecutor.create(
+      const executor = (await LocalAgentExecutor.create(
         definition,
         mockConfig,
         onActivity,
-      );
+      )) as LegacyLoop<any>;
       const inputs: AgentInputs = { goal: 'Find files' };
 
       // Turn 1: Model calls ls
@@ -742,11 +742,11 @@ describe('LocalAgentExecutor', () => {
 
     it('should execute successfully when model calls complete_task without output (Happy Path No Output)', async () => {
       const definition = createTestDefinition([LS_TOOL_NAME], {}, 'none');
-      const executor = await LocalAgentExecutor.create(
+      const executor = (await LocalAgentExecutor.create(
         definition,
         mockConfig,
         onActivity,
-      );
+      )) as LegacyLoop<any>;
 
       mockModelResponse([
         { name: LS_TOOL_NAME, args: { path: '.' }, id: 'call1' },
@@ -820,11 +820,11 @@ describe('LocalAgentExecutor', () => {
 
     it('should error immediately if the model stops tools without calling complete_task (Protocol Violation)', async () => {
       const definition = createTestDefinition();
-      const executor = await LocalAgentExecutor.create(
+      const executor = (await LocalAgentExecutor.create(
         definition,
         mockConfig,
         onActivity,
-      );
+      )) as LegacyLoop<any>;
 
       mockModelResponse([
         { name: LS_TOOL_NAME, args: { path: '.' }, id: 'call1' },
@@ -901,11 +901,11 @@ describe('LocalAgentExecutor', () => {
 
     it('should report an error if complete_task is called with missing required arguments', async () => {
       const definition = createTestDefinition();
-      const executor = await LocalAgentExecutor.create(
+      const executor = (await LocalAgentExecutor.create(
         definition,
         mockConfig,
         onActivity,
-      );
+      )) as LegacyLoop<any>;
 
       // Turn 1: Missing arg
       mockModelResponse([
@@ -967,11 +967,11 @@ describe('LocalAgentExecutor', () => {
 
     it('should handle multiple calls to complete_task in the same turn (accept first, block rest)', async () => {
       const definition = createTestDefinition([], {}, 'none');
-      const executor = await LocalAgentExecutor.create(
+      const executor = (await LocalAgentExecutor.create(
         definition,
         mockConfig,
         onActivity,
-      );
+      )) as LegacyLoop<any>;
 
       // Turn 1: Duplicate calls
       mockModelResponse([
@@ -1013,11 +1013,11 @@ describe('LocalAgentExecutor', () => {
 
     it('should execute parallel tool calls and then complete', async () => {
       const definition = createTestDefinition([LS_TOOL_NAME]);
-      const executor = await LocalAgentExecutor.create(
+      const executor = (await LocalAgentExecutor.create(
         definition,
         mockConfig,
         onActivity,
-      );
+      )) as LegacyLoop<any>;
 
       const call1: FunctionCall = {
         name: LS_TOOL_NAME,
@@ -1118,11 +1118,11 @@ describe('LocalAgentExecutor', () => {
 
     it('SECURITY: should block unauthorized tools and provide explicit failure to model', async () => {
       const definition = createTestDefinition([LS_TOOL_NAME]);
-      const executor = await LocalAgentExecutor.create(
+      const executor = (await LocalAgentExecutor.create(
         definition,
         mockConfig,
         onActivity,
-      );
+      )) as LegacyLoop<any>;
 
       // Turn 1: Model tries to use a tool not in its config
       const badCallId = 'bad_call_1';
@@ -1195,11 +1195,11 @@ describe('LocalAgentExecutor', () => {
         'default',
         z.string().min(10), // The schema is for the output value itself
       );
-      const executor = await LocalAgentExecutor.create(
+      const executor = (await LocalAgentExecutor.create(
         definition,
         mockConfig,
         onActivity,
-      );
+      )) as LegacyLoop<any>;
 
       // Turn 1: Invalid arg (too short)
       mockModelResponse([
@@ -1267,11 +1267,11 @@ describe('LocalAgentExecutor', () => {
       });
 
       // We expect the error to be thrown during the run, not creation
-      const executor = await LocalAgentExecutor.create(
+      const executor = (await LocalAgentExecutor.create(
         definition,
         mockConfig,
         onActivity,
-      );
+      )) as LegacyLoop<any>;
 
       await expect(
         (executor as any).runLegacy({ goal: 'test' }, signal),
@@ -1300,11 +1300,11 @@ describe('LocalAgentExecutor', () => {
 
     it('should handle a failed tool call and feed the error to the model', async () => {
       const definition = createTestDefinition([LS_TOOL_NAME]);
-      const executor = await LocalAgentExecutor.create(
+      const executor = (await LocalAgentExecutor.create(
         definition,
         mockConfig,
         onActivity,
-      );
+      )) as LegacyLoop<any>;
       const toolErrorMessage = 'Tool failed spectacularly';
 
       // Turn 1: Model calls a tool that will fail
@@ -1415,11 +1415,11 @@ describe('LocalAgentExecutor', () => {
         generateContentConfig: {},
       } as unknown as ResolvedModelConfig);
 
-      const executor = await LocalAgentExecutor.create(
+      const executor = (await LocalAgentExecutor.create(
         definition,
         mockConfig,
         onActivity,
-      );
+      )) as LegacyLoop<any>;
 
       mockModelResponse([
         {
@@ -1461,11 +1461,11 @@ describe('LocalAgentExecutor', () => {
         generateContentConfig: {},
       } as unknown as ResolvedModelConfig);
 
-      const executor = await LocalAgentExecutor.create(
+      const executor = (await LocalAgentExecutor.create(
         definition,
         mockConfig,
         onActivity,
-      );
+      )) as LegacyLoop<any>;
 
       mockModelResponse([
         {
@@ -1522,7 +1522,7 @@ describe('LocalAgentExecutor', () => {
       const definition = createTestDefinition([LS_TOOL_NAME], {
         maxTurns: MAX,
       });
-      const executor = await LocalAgentExecutor.create(definition, mockConfig);
+      const executor = (await LocalAgentExecutor.create(definition, mockConfig)) as LegacyLoop<any>;
 
       mockWorkResponse('t1');
       mockWorkResponse('t2');
@@ -1542,11 +1542,11 @@ describe('LocalAgentExecutor', () => {
       const definition = createTestDefinition([LS_TOOL_NAME], {
         maxTimeMinutes: 0.5, // 30 seconds
       });
-      const executor = await LocalAgentExecutor.create(
+      const executor = (await LocalAgentExecutor.create(
         definition,
         mockConfig,
         onActivity,
-      );
+      )) as LegacyLoop<any>;
 
       // Mock a model call that is interruptible by an abort signal.
       mockSendMessageStream.mockImplementationOnce(
@@ -1606,7 +1606,7 @@ describe('LocalAgentExecutor', () => {
       const definition = createTestDefinition([LS_TOOL_NAME], {
         maxTimeMinutes: 1,
       });
-      const executor = await LocalAgentExecutor.create(definition, mockConfig);
+      const executor = (await LocalAgentExecutor.create(definition, mockConfig)) as LegacyLoop<any>;
 
       mockModelResponse([
         { name: LS_TOOL_NAME, args: { path: '.' }, id: 't1' },
@@ -1649,7 +1649,7 @@ describe('LocalAgentExecutor', () => {
 
     it('should terminate when AbortSignal is triggered', async () => {
       const definition = createTestDefinition();
-      const executor = await LocalAgentExecutor.create(definition, mockConfig);
+      const executor = (await LocalAgentExecutor.create(definition, mockConfig)) as LegacyLoop<any>;
 
       mockSendMessageStream.mockImplementationOnce(async () =>
         (async function* () {
@@ -1706,11 +1706,11 @@ describe('LocalAgentExecutor', () => {
       const definition = createTestDefinition([LS_TOOL_NAME], {
         maxTurns: MAX,
       });
-      const executor = await LocalAgentExecutor.create(
+      const executor = (await LocalAgentExecutor.create(
         definition,
         mockConfig,
         onActivity,
-      );
+      )) as LegacyLoop<any>;
 
       // Turn 1 (hits max_turns)
       mockWorkResponse('t1');
@@ -1759,11 +1759,11 @@ describe('LocalAgentExecutor', () => {
       const definition = createTestDefinition([LS_TOOL_NAME], {
         maxTurns: MAX,
       });
-      const executor = await LocalAgentExecutor.create(
+      const executor = (await LocalAgentExecutor.create(
         definition,
         mockConfig,
         onActivity,
-      );
+      )) as LegacyLoop<any>;
 
       // Turn 1 (hits max_turns)
       mockWorkResponse('t1');
@@ -1793,11 +1793,11 @@ describe('LocalAgentExecutor', () => {
 
     it('should recover successfully from a protocol violation (no complete_task)', async () => {
       const definition = createTestDefinition();
-      const executor = await LocalAgentExecutor.create(
+      const executor = (await LocalAgentExecutor.create(
         definition,
         mockConfig,
         onActivity,
-      );
+      )) as LegacyLoop<any>;
 
       // Turn 1: Normal work
       mockWorkResponse('t1');
@@ -1838,11 +1838,11 @@ describe('LocalAgentExecutor', () => {
 
     it('should fail recovery from a protocol violation if it violates again', async () => {
       const definition = createTestDefinition();
-      const executor = await LocalAgentExecutor.create(
+      const executor = (await LocalAgentExecutor.create(
         definition,
         mockConfig,
         onActivity,
-      );
+      )) as LegacyLoop<any>;
 
       // Turn 1: Normal work
       mockWorkResponse('t1');
@@ -1881,11 +1881,11 @@ describe('LocalAgentExecutor', () => {
       const definition = createTestDefinition([LS_TOOL_NAME], {
         maxTimeMinutes: 0.5, // 30 seconds
       });
-      const executor = await LocalAgentExecutor.create(
+      const executor = (await LocalAgentExecutor.create(
         definition,
         mockConfig,
         onActivity,
-      );
+      )) as LegacyLoop<any>;
 
       // Mock a model call that gets interrupted by the timeout.
       mockSendMessageStream.mockImplementationOnce(
@@ -1941,11 +1941,11 @@ describe('LocalAgentExecutor', () => {
       const definition = createTestDefinition([LS_TOOL_NAME], {
         maxTimeMinutes: 0.5, // 30 seconds
       });
-      const executor = await LocalAgentExecutor.create(
+      const executor = (await LocalAgentExecutor.create(
         definition,
         mockConfig,
         onActivity,
-      );
+      )) as LegacyLoop<any>;
 
       mockSendMessageStream.mockImplementationOnce(
         async (_key, _message, _promptId, signal) =>
@@ -2039,7 +2039,7 @@ describe('LocalAgentExecutor', () => {
       const definition = createTestDefinition([LS_TOOL_NAME], {
         maxTurns: MAX,
       });
-      const executor = await LocalAgentExecutor.create(definition, mockConfig);
+      const executor = (await LocalAgentExecutor.create(definition, mockConfig)) as LegacyLoop<any>;
 
       // Turn 1 (hits max_turns)
       mockWorkResponse('t1');
@@ -2067,7 +2067,7 @@ describe('LocalAgentExecutor', () => {
       const definition = createTestDefinition([LS_TOOL_NAME], {
         maxTurns: MAX,
       });
-      const executor = await LocalAgentExecutor.create(definition, mockConfig);
+      const executor = (await LocalAgentExecutor.create(definition, mockConfig)) as LegacyLoop<any>;
 
       // Turn 1 (hits max_turns)
       mockWorkResponse('t1');
@@ -2112,10 +2112,10 @@ describe('LocalAgentExecutor', () => {
       it('should inject user hints into the next turn after they are added', async () => {
         const definition = createTestDefinition();
 
-        const executor = await LocalAgentExecutor.create(
+        const executor = (await LocalAgentExecutor.create(
           definition,
           configWithHints,
-        );
+        )) as LegacyLoop<any>;
 
         // Turn 1: Model calls LS
         mockModelResponse(
@@ -2198,10 +2198,10 @@ describe('LocalAgentExecutor', () => {
         const definition = createTestDefinition();
         configWithHints.userHintService.addUserHint('Legacy Hint');
 
-        const executor = await LocalAgentExecutor.create(
+        const executor = (await LocalAgentExecutor.create(
           definition,
           configWithHints,
-        );
+        )) as LegacyLoop<any>;
 
         mockModelResponse([
           {
@@ -2226,10 +2226,10 @@ describe('LocalAgentExecutor', () => {
 
       it('should inject mid-execution hints into subsequent turns', async () => {
         const definition = createTestDefinition();
-        const executor = await LocalAgentExecutor.create(
+        const executor = (await LocalAgentExecutor.create(
           definition,
           configWithHints,
-        );
+        )) as LegacyLoop<any>;
 
         // Turn 1: Model calls LS
         mockModelResponse(
@@ -2342,11 +2342,11 @@ describe('LocalAgentExecutor', () => {
 
     it('should attempt to compress chat history on each turn', async () => {
       const definition = createTestDefinition();
-      const executor = await LocalAgentExecutor.create(
+      const executor = (await LocalAgentExecutor.create(
         definition,
         mockConfig,
         onActivity,
-      );
+      )) as LegacyLoop<any>;
 
       // Mock compression to do nothing
       mockCompress.mockResolvedValue({
@@ -2376,11 +2376,11 @@ describe('LocalAgentExecutor', () => {
 
     it('should update chat history when compression is successful', async () => {
       const definition = createTestDefinition();
-      const executor = await LocalAgentExecutor.create(
+      const executor = (await LocalAgentExecutor.create(
         definition,
         mockConfig,
         onActivity,
-      );
+      )) as LegacyLoop<any>;
       const compressedHistory: Content[] = [
         { role: 'user', parts: [{ text: 'compressed' }] },
       ];
@@ -2411,11 +2411,11 @@ describe('LocalAgentExecutor', () => {
 
     it('should pass hasFailedCompressionAttempt=true to compression after a failure', async () => {
       const definition = createTestDefinition();
-      const executor = await LocalAgentExecutor.create(
+      const executor = (await LocalAgentExecutor.create(
         definition,
         mockConfig,
         onActivity,
-      );
+      )) as LegacyLoop<any>;
 
       // First call fails
       mockCompress.mockResolvedValueOnce({
@@ -2456,11 +2456,11 @@ describe('LocalAgentExecutor', () => {
 
     it('should reset hasFailedCompressionAttempt flag after a successful compression', async () => {
       const definition = createTestDefinition();
-      const executor = await LocalAgentExecutor.create(
+      const executor = (await LocalAgentExecutor.create(
         definition,
         mockConfig,
         onActivity,
-      );
+      )) as LegacyLoop<any>;
       const compressedHistory: Content[] = [
         { role: 'user', parts: [{ text: 'compressed' }] },
       ];
