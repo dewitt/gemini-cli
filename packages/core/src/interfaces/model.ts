@@ -7,8 +7,8 @@
 import {
   type PartListUnion,
   type GenerateContentResponse,
+  type Tool,
 } from '@google/genai';
-import type { Tool } from '@google/genai';
 import type { ModelConfigKey } from '../services/modelConfigService.js';
 import type { ToolCallRequestInfo } from '../scheduler/types.js';
 
