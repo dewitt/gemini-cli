@@ -1826,6 +1826,15 @@ const SETTINGS_SCHEMA = {
           'Enable model steering (user hints) to guide the model during tool execution.',
         showInDialog: true,
       },
+      useAdk: {
+        type: 'boolean',
+        label: 'Use ADK',
+        category: 'Experimental',
+        requiresRestart: true,
+        default: false,
+        description: 'Enable ADK-based agent execution.',
+        showInDialog: true,
+      },
       directWebFetch: {
         type: 'boolean',
         label: 'Direct Web Fetch',

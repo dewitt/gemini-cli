@@ -17,6 +17,7 @@ import { AdkToolAdapter } from './adk-tool-adapter.js';
 import { AdkAgentWrapper } from './adk-agent-wrapper.js';
 import { type z } from 'zod';
 import { debugLogger } from '../utils/debugLogger.js';
+import type { GeminiChat } from '../core/geminiChat.js';
 
 /**
  * Factory for creating ADK-based agents that are compatible with the Gemini CLI.
@@ -25,15 +26,17 @@ export class AdkAgentFactory {
   static async create<TOutput extends z.ZodTypeAny>(
     definition: LocalAgentDefinition<TOutput>,
     runtimeContext: Config,
+    chat?: GeminiChat,
   ): Promise<Agent<AgentInputs, OutputObject>> {
     debugLogger.log(`[AdkAgentFactory] Creating ADK agent: ${definition.name}`);
-    const chat = await runtimeContext.getGeminiClient().startChat();
+    const activeChat =
+      chat || (await runtimeContext.getGeminiClient().startChat());
     const modelName =
       definition.modelConfig.model === 'inherit'
         ? runtimeContext.getActiveModel()
         : definition.modelConfig.model || runtimeContext.getActiveModel();
 
-    const model = new AdkGeminiModel(chat, modelName);
+    const model = new AdkGeminiModel(activeChat, modelName);
 
     const toolRegistry = runtimeContext.getToolRegistry();
     const adkTools = toolRegistry
