@@ -842,7 +842,6 @@ export class GeminiClient {
     }
     return turn;
   }
-
   async *sendMessageStream(
     request: PartListUnion,
     signal: AbortSignal,
@@ -856,9 +855,63 @@ export class GeminiClient {
       this.config.resetTurn();
     }
 
+    if (this.config.getUseAdk()) {
+      // Dynamic imports to avoid circular dependencies
+      const { AdkAgentFactory } = await import('../adk/adk-agent-factory.js');
+      const { MainChatAgentDefinition } = await import(
+        '../agents/main-chat-agent.js'
+      );
+
+      const definition = MainChatAgentDefinition(this.config);
+      const agent = await AdkAgentFactory.create(
+        definition,
+        this.config,
+        this.getChat(),
+      );
+
+      const inputs = { request: partListUnionToString(request) };
+      const eventStream = agent.runAsync(inputs, {
+        signal,
+        prompt_id,
+        sessionId: this.config.getSessionId(),
+      });
+
+      for await (const event of eventStream) {
+        switch (event.type) {
+          case 'content':
+            yield { type: GeminiEventType.Content, value: event.content };
+            break;
+          case 'thought':
+            yield {
+              type: GeminiEventType.Thought,
+              value: { subject: '', description: event.content },
+            };
+            break;
+          case 'tool_call':
+            yield { type: GeminiEventType.ToolCallRequest, value: event.call };
+            break;
+          case 'tool_result':
+            yield {
+              type: GeminiEventType.ToolCallResponse,
+              value: event.result,
+            };
+            break;
+          case 'error':
+            yield {
+              type: GeminiEventType.Error,
+              value: { error: event.error },
+            };
+            break;
+          default:
+            // Skip unhandled ADK events
+            break;
+        }
+      }
+      return new Turn(this.getChat(), prompt_id);
+    }
+
     const hooksEnabled = this.config.getEnableHooks();
     const messageBus = this.config.getMessageBus();
-
     if (this.lastPromptId !== prompt_id) {
       this.loopDetector.reset(prompt_id, partListUnionToString(request));
       this.hookStateMap.delete(this.lastPromptId);

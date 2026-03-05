@@ -2,10 +2,10 @@
   "experimental": {
     "plan": true,
     "extensionReloading": true,
-    "modelSteering": true
+    "modelSteering": true,
+    "useAdk": true
   },
   "general": {
-    "devtools": true,
-    "useAdk": true
+    "devtools": true
   }
 }
