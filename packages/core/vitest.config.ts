@@ -13,11 +13,6 @@ export default defineConfig({
     hookTimeout: 60000,
     pool: 'forks',
     silent: true,
-    server: {
-      deps: {
-        inline: ['@google/adk'],
-      },
-    },
     setupFiles: ['./test-setup.ts'],
     outputFile: {
       junit: 'junit.xml',
