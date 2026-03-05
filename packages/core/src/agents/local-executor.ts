@@ -61,6 +61,7 @@ import { getVersion } from '../utils/version.js';
 import { getToolCallContext } from '../utils/toolCallContext.js';
 import { scheduleAgentTools } from './agent-scheduler.js';
 import { DeadlineTimer } from '../utils/deadlineTimer.js';
+import { AdkAgentFactory } from '../adk/adk-agent-factory.js';
 import { formatUserHintsForModel } from '../utils/fastAckHelper.js';
 
 /** A callback function to report on agent activity. */
@@ -126,7 +127,10 @@ export class LocalAgentExecutor<TOutput extends z.ZodTypeAny>
     definition: LocalAgentDefinition<TOutput>,
     runtimeContext: Config,
     onActivity?: ActivityCallback,
-  ): Promise<LocalAgentExecutor<TOutput>> {
+  ): Promise<Agent<AgentInputs, OutputObject>> {
+    if (runtimeContext.getUseAdk()) {
+      return AdkAgentFactory.create(definition, runtimeContext);
+    }
     // Create an isolated tool registry for this agent instance.
     const agentToolRegistry = new ToolRegistry(
       runtimeContext,

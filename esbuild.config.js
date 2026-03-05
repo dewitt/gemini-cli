@@ -64,6 +64,11 @@ const external = [
   '@lydell/node-pty-win32-x64',
   'keytar',
   '@google/gemini-cli-devtools',
+  'better-sqlite3',
+  'libsql',
+  'mysql',
+  'oracledb',
+  'pg-query-stream',
 ];
 
 const baseConfig = {
