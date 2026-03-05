@@ -41,7 +41,14 @@ async function main() {
     sourcesContent: false,
     platform: 'node',
     outfile: 'dist/extension.cjs',
-    external: ['vscode'],
+    external: [
+      'vscode',
+      'better-sqlite3',
+      'libsql',
+      'mysql',
+      'oracledb',
+      'pg-query-stream',
+    ],
     logLevel: 'silent',
     banner: {
       js: `const import_meta = { url: require('url').pathToFileURL(__filename).href };`,

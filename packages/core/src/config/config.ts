@@ -589,6 +589,7 @@ export interface ConfigParameters {
   mcpEnabled?: boolean;
   extensionsEnabled?: boolean;
   agents?: AgentSettings;
+  useAdk?: boolean;
   onReload?: () => Promise<{
     disabledSkills?: string[];
     adminSkillsEnabled?: boolean;
@@ -603,6 +604,7 @@ export interface ConfigParameters {
 export class Config implements McpContext, AgentLoopContext {
   private _toolRegistry!: ToolRegistry;
   private mcpClientManager?: McpClientManager;
+  private useAdk: boolean;
   private allowedMcpServers: string[];
   private blockedMcpServers: string[];
   private allowedEnvironmentVariables: string[];
@@ -838,6 +840,7 @@ export class Config implements McpContext, AgentLoopContext {
     this.blockedEnvironmentVariables = params.blockedEnvironmentVariables ?? [];
     this.enableEnvironmentVariableRedaction =
       params.enableEnvironmentVariableRedaction ?? false;
+    this.useAdk = params.useAdk ?? false;
     this.userMemory = params.userMemory ?? '';
     this.geminiMdFileCount = params.geminiMdFileCount ?? 0;
     this.geminiMdFilePaths = params.geminiMdFilePaths ?? [];
@@ -1634,6 +1637,10 @@ export class Config implements McpContext, AgentLoopContext {
   /** @deprecated Use toolRegistry getter */
   getToolRegistry(): ToolRegistry {
     return this.toolRegistry;
+  }
+
+  getUseAdk(): boolean {
+    return this.useAdk;
   }
 
   getPromptRegistry(): PromptRegistry {
