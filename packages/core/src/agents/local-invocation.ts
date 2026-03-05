@@ -226,7 +226,29 @@ export class LocalSubagentInvocation extends BaseToolInvocation<
         onActivity,
       );
 
-      const output = await executor.run(this.params, signal);
+      const stream = executor.runEphemeral(this.params, { signal });
+      let output;
+
+      for await (const event of stream) {
+        if (event.type === 'finished') {
+          if (
+            event.output &&
+            typeof event.output === 'object' &&
+            'terminate_reason' in event.output &&
+            'result' in event.output
+          ) {
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+            output = event.output as {
+              terminate_reason: string;
+              result: string;
+            };
+          }
+        }
+      }
+
+      if (!output) {
+        throw new Error('Agent stream ended without a final result.');
+      }
 
       if (output.terminate_reason === AgentTerminateMode.ABORTED) {
         const progress: SubagentProgress = {
