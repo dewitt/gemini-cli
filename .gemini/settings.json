@@ -5,6 +5,7 @@
     "modelSteering": true
   },
   "general": {
-    "devtools": true
+    "devtools": true,
+    "useAdk": true
   }
 }
