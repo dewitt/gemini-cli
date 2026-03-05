@@ -20,12 +20,10 @@ import {
   type FunctionDeclaration,
   type Schema,
 } from '@google/genai';
-import { ToolRegistry } from '../tools/tool-registry.js';
+import type { ToolRegistry } from '../tools/tool-registry.js';
 import { CompressionStatus } from '../core/turn.js';
-import type {
-  ToolCallRequestInfo,
-  ToolCallResponseInfo,
-} from '../scheduler/types.js';
+import type { ToolCallRequestInfo } from '../scheduler/types.js';
+import { randomUUID } from 'node:crypto';
 import { CoreToolCallStatus } from '../scheduler/types.js';
 import { ChatCompressionService } from '../services/chatCompressionService.js';
 import { getDirectoryContextString } from '../utils/environmentContext.js';
@@ -39,6 +37,7 @@ import {
   AgentStartEvent,
   AgentFinishEvent,
   RecoveryAttemptEvent,
+  LlmRole,
 } from '../telemetry/types.js';
 import {
   AgentTerminateMode,
@@ -53,12 +52,11 @@ import {
 import { getErrorMessage } from '../utils/errors.js';
 import { templateString } from './utils.js';
 import { DEFAULT_GEMINI_MODEL, isAutoModel } from '../config/models.js';
-import type { RoutingContext } from '../routing/routingStrategy.js';
-import { parseThought } from '../utils/thoughtUtils.js';
+// removed routing context
 import { type z } from 'zod';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 import { debugLogger } from '../utils/debugLogger.js';
-import { getModelConfigAlias } from './registry.js';
+// removed getModelConfigAlias
 import { getVersion } from '../utils/version.js';
 import { scheduleAgentTools } from './agent-scheduler.js';
 import { DeadlineTimer } from '../utils/deadlineTimer.js';
@@ -225,7 +223,7 @@ Important Rules:
 * Work systematically using available tools to complete your task.
 * Always use absolute paths for file operations. Construct them using the provided "Environment Context".`;
 
-    if (this.definition.outputSchema) {
+    if (this.definition.outputConfig?.schema) {
       finalPrompt += `
 * When you have completed your task, you MUST call the \`${TASK_COMPLETE_TOOL_NAME}\` tool with your structured output.
 * Do not call any other tools in the same turn as \`${TASK_COMPLETE_TOOL_NAME}\`.
@@ -288,7 +286,9 @@ Important Rules:
     } else {
       // If no tools explicitly configured, default to all available tools
       const allNames = this.toolRegistry.getAllToolNames();
-      toolsList.push(...this.toolRegistry.getFunctionDeclarationsFiltered(allNames));
+      toolsList.push(
+        ...this.toolRegistry.getFunctionDeclarationsFiltered(allNames),
+      );
     }
 
     // Always inject complete_task.
@@ -332,14 +332,14 @@ Important Rules:
   }
 
   private emitActivity(
-    type: string,
+    type: SubagentActivityEvent['type'],
     data: Record<string, unknown>,
   ) {
     if (!this.onActivity) return;
     this.onActivity({
       isSubagentActivityEvent: true,
       agentName: this.definition.name,
-      type: type as SubagentActivityEvent['type'],
+      type,
       data,
     });
   }
@@ -350,73 +350,60 @@ Important Rules:
    */
   private async *callModel(
     chat: GeminiChat,
-    requestParams: Content,
-    signal: AbortSignal,
-    prompt_id: string,
+    currentMessage: Content,
+    combinedSignal: AbortSignal,
+    promptId: string,
   ): AsyncGenerator<
     AgentEvent,
     { functionCalls: FunctionCall[]; textResponse: string }
   > {
-    // Generate context for routing based on configured required tools and model config logic
     let modelInstanceConfigAlias = this.definition.modelConfig.model;
-    const routingContext: RoutingContext = {
-      requiredTools: this.definition.toolConfig?.requiredTools,
-    };
+    // Assume auto model means using the active context model.
     if (!modelInstanceConfigAlias || isAutoModel(modelInstanceConfigAlias)) {
-      const suggestedModel =
-        chat.runtimeContext
-          .getModelRouterService()
-          ?.routeToModel(routingContext);
-      if (suggestedModel) {
-        modelInstanceConfigAlias = suggestedModel.name;
-        chat.overrideModelConfig(modelInstanceConfigAlias);
-      }
+      modelInstanceConfigAlias = this.runtimeContext.getActiveModel();
     }
 
     try {
       this.emitActivity('CALL_START', { model: modelInstanceConfigAlias });
 
-      const stream = await chat.sendMessageStream(requestParams, {
-        signal,
-        prompt_id,
-        enableProgressEvents: true,
-      });
+      const modelConfigKey: import('../services/modelConfigService.js').ModelConfigKey =
+        {
+          model: modelInstanceConfigAlias,
+          overrideScope: this.agentId,
+        };
+
+      const stream = await chat.sendMessageStream(
+        modelConfigKey,
+        currentMessage.parts || [],
+        promptId,
+        combinedSignal,
+        LlmRole.MAIN,
+      );
 
       let textBuffer = '';
       const functionCalls: FunctionCall[] = [];
-      let thoughtBuffer = '';
+      let _thoughtBuffer = '';
 
-      chat.runtimeContext
+      this.runtimeContext
         .getMessageBus()
-        .emit('model-streaming-started', { promptId: prompt_id });
+        .emit('model-streaming-started', { promptId });
 
       for await (const chunk of stream) {
-        if (chunk.type === StreamEventType.CONTENT) {
-          const modelTurn = chunk.content;
-          for (const item of modelTurn.parts) {
+        if (chunk.type === StreamEventType.CHUNK && chunk.value) {
+          const resp = chunk.value;
+          const parts = resp.candidates?.[0]?.content?.parts ?? [];
+          for (const item of parts) {
             if (item.functionCall) {
               functionCalls.push(item.functionCall);
             }
-            if (item.text) {
+            if (item.thought && item.text) {
+              _thoughtBuffer += item.text;
+              this.emitActivity('THOUGHT_CHUNK', { text: item.text });
+              yield { type: 'thought', content: item.text };
+            } else if (!item.thought && item.text) {
               textBuffer += item.text;
-            }
-          }
-
-          if (textBuffer.length > 0) {
-            const parsed = parseThought(textBuffer);
-
-            // Yield new thought fragments
-            if (parsed.thought !== thoughtBuffer) {
-              const diff = parsed.thought.substring(thoughtBuffer.length);
-              this.emitActivity('THOUGHT_CHUNK', { text: diff });
-              yield { type: 'thought', content: diff };
-              thoughtBuffer = parsed.thought;
-            }
-
-            // Yield new final content chunks
-            if (parsed.content) {
-              yield { type: 'content', content: parsed.content };
-              this.emitActivity('RESPONSE_CHUNK', { text: parsed.content });
+              this.emitActivity('RESPONSE_CHUNK', { text: item.text });
+              yield { type: 'content', content: item.text };
             }
           }
         }
@@ -429,7 +416,8 @@ Important Rules:
 
       return { functionCalls, textResponse: textBuffer };
     } catch (e: unknown) {
-      if (signal.aborted) {
+      void reportError(e, 'LegacyLoop callModel failed');
+      if (combinedSignal.aborted) {
         throw new Error('callModel interrupted or timed out.');
       }
       const message = `Agent model call encountered a fatal error: ${getErrorMessage(e)}`;
@@ -439,7 +427,7 @@ Important Rules:
         details: e instanceof Error ? e.stack : undefined,
       });
       // Important to report errors originating from agents.
-      reportError(e);
+      void reportError(e, 'LegacyLoop callModel failed');
       throw e;
     }
   }
@@ -472,6 +460,7 @@ Important Rules:
           const { outputName, schema } = this.definition.outputConfig;
           const outputData = taskCompleteCall.args[outputName];
           try {
+            // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
             const parsedData = schema.parse(outputData);
             if (this.definition.processOutput) {
               submittedOutput = this.definition.processOutput(parsedData);
@@ -484,7 +473,7 @@ Important Rules:
             );
           }
         } else if ('result' in taskCompleteCall.args) {
-          submittedOutput = taskCompleteCall.args.result as string;
+          submittedOutput = String(taskCompleteCall.args['result']);
         }
       }
 
@@ -505,14 +494,10 @@ Important Rules:
 
     // Build the request info structures to pass to scheduler
     const requestInfos: ToolCallRequestInfo[] = functionCalls.map((call) => {
-      // The cast to string is required because call.id doesn't exist on genai FunctionCall
-      // but might be manually added dynamically elsewhere? Let's use string.
-      const rawCall = call as unknown as { id?: string };
+      const toolCallId = `${this.agentId}-${call.name}-${randomUUID()}`;
       return {
-        callId:
-          rawCall.id ||
-          `synthetic-call-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-        name: call.name,
+        callId: toolCallId,
+        name: call.name!,
         args: call.args || {},
         prompt_id: promptId,
         isClientInitiated: false,
@@ -527,49 +512,48 @@ Important Rules:
       });
       yield { type: 'tool_call', call: info };
     }
-
-    try {
-      const results = await scheduleAgentTools(
-        requestInfos,
-        this.toolRegistry,
-        this.agentId,
-        this.runtimeContext,
+    const results = await scheduleAgentTools(
+      this.runtimeContext,
+      requestInfos,
+      {
+        schedulerId: this.agentId,
+        parentCallId: this.parentCallId,
+        toolRegistry: this.toolRegistry,
+        signal,
         onWaitingForConfirmation,
-      );
+      },
+    );
 
-      for (let i = 0; i < results.length; i++) {
-        const result = results[i]!;
+    for (let i = 0; i < results.length; i++) {
+      const result = results[i];
 
-        if (result.status === CoreToolCallStatus.Cancelled) {
-          aborted = true;
-          const argsString = JSON.stringify(result.request.args, null);
-          const reportStr = `The user chose to abort the agent execution while attempting to run: ${result.request.name}(${argsString})`;
+      if (result.status === CoreToolCallStatus.Cancelled) {
+        aborted = true;
+        const argsString = JSON.stringify(result.request.args, null);
+        const reportStr = `The user chose to abort the agent execution while attempting to run: ${result.request.name}(${argsString})`;
 
-          this.emitActivity('ERROR', {
-            context: 'tool_call',
-            name: result.request.name,
-            error: 'User rejected tool execution.',
-          });
-
-          throw new Error(reportStr);
-        }
-
-        toolResponses.push(...result.response.responseParts);
-
-        this.emitActivity('TOOL_CALL_END', {
+        this.emitActivity('ERROR', {
+          context: 'tool_call',
           name: result.request.name,
-          error: result.response.error?.name,
-          durationMs: result.durationMs,
+          error: 'User rejected tool execution.',
         });
 
-        // Yield result event back to UI
-        yield {
-          type: 'tool_result',
-          result: result.response,
-        };
+        throw new Error(reportStr);
       }
-    } catch (error) {
-      throw error;
+
+      toolResponses.push(...result.response.responseParts);
+
+      this.emitActivity('TOOL_CALL_END', {
+        name: result.request.name,
+        error: result.response.error?.name,
+        durationMs: result.durationMs,
+      });
+
+      // Yield result event back to UI
+      yield {
+        type: 'tool_result',
+        result: result.response,
+      };
     }
 
     return {
