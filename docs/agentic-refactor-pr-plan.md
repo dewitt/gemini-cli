@@ -7,17 +7,17 @@ changes from our private fork to the upstream public repository
 **CRITICAL MANDATE:** We will execute this process strictly "by the book" as
 defined in `CONTRIBUTING.md`. Every step must follow this exact sequence:
 
-1.  **Issue Creation:** Open an issue describing the specific need or
-    architectural change. Wait for maintainer approval/alignment (or
-    self-approve if appropriate, but the issue must exist).
-2.  **Branching:** Create a clean, focused branch for the specific PR.
-3.  **Implementation:** Write the code and comprehensive tests.
-4.  **Verification:** Run `npm run preflight` and ensure absolute 100% pass
-    rate. No exceptions.
-5.  **Draft PR (Optional):** If a PR is intentionally incomplete or needs early
-    architectural review, it MUST be marked as a DRAFT.
-6.  **Final PR:** Submit the PR, linking it to the corresponding issue (e.g.,
-    `Fixes #123`).
+1. **Issue Creation:** Open an issue describing the specific need or
+   architectural change. Wait for maintainer approval/alignment (or self-approve
+   if appropriate, but the issue must exist).
+1. **Branching:** Create a clean, focused branch for the specific PR.
+1. **Implementation:** Write the code and comprehensive tests.
+1. **Verification:** Run `npm run preflight` and ensure absolute 100% pass rate.
+   No exceptions.
+1. **Draft PR (Optional):** If a PR is intentionally incomplete or needs early
+   architectural review, it MUST be marked as a DRAFT.
+1. **Final PR:** Submit the PR, linking it to the corresponding issue (e.g.,
+   `Fixes #123`).
 
 To ensure PRs are "small and focused", we will break the monolithic refactor
 branch into the following sequential pull requests:
@@ -56,11 +56,13 @@ existing runtime behavior.
 ## PR 3: Refactor Local Agent Executor to use new Interfaces
 
 **Goal:** Migrate the legacy internal execution loop to implement the new
-`Agent` interface natively.
+`Agent` interface natively, preserving backwards compatibility via a legacy loop
+wrapper.
 
 - **Pre-requisite:** Create an Issue for refactoring the `LocalAgentExecutor` to
   act as an `AsyncGenerator` yielding `AgentEvent`s.
 - **Contents:**
+  - `packages/core/src/agents/legacy-loop.ts`
   - `packages/core/src/agents/local-executor.ts`
   - `packages/core/src/agents/local-executor.test.ts`
   - `packages/core/src/agents/local-invocation.ts`
