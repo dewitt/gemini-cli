@@ -183,7 +183,7 @@ describe('LocalSubagentInvocation', () => {
         result: 'Analysis complete.',
         terminate_reason: AgentTerminateMode.GOAL,
       };
-       
+
       mockExecutorInstance.runEphemeral.mockImplementation(async function* () {
         yield { type: 'finished', output: mockOutput } as AgentEvent;
         return mockOutput;
@@ -223,7 +223,10 @@ describe('LocalSubagentInvocation', () => {
         result: 'Partial progress...',
         terminate_reason: AgentTerminateMode.TIMEOUT,
       };
-      mockExecutorInstance.run.mockResolvedValue(mockOutput);
+      mockExecutorInstance.runEphemeral.mockImplementation(async function* () {
+        yield { type: 'finished', output: mockOutput } as AgentEvent;
+        return mockOutput;
+      });
 
       const result = await invocation.execute(signal, updateOutput);
 
@@ -235,7 +238,6 @@ describe('LocalSubagentInvocation', () => {
     });
 
     it('should stream THOUGHT_CHUNK activities from the executor', async () => {
-       
       mockExecutorInstance.runEphemeral.mockImplementation(async function* () {
         const onActivity = MockLocalAgentExecutor.create.mock.calls[0][2];
 
@@ -274,7 +276,6 @@ describe('LocalSubagentInvocation', () => {
     });
 
     it('should stream other activities (e.g., TOOL_CALL_START, ERROR)', async () => {
-       
       mockExecutorInstance.runEphemeral.mockImplementation(async function* () {
         const onActivity = MockLocalAgentExecutor.create.mock.calls[0][2];
 
@@ -314,7 +315,6 @@ describe('LocalSubagentInvocation', () => {
     });
 
     it('should run successfully without an updateOutput callback', async () => {
-       
       mockExecutorInstance.runEphemeral.mockImplementation(async function* () {
         const onActivity = MockLocalAgentExecutor.create.mock.calls[0][2];
         if (onActivity) {
@@ -409,7 +409,7 @@ describe('LocalSubagentInvocation', () => {
         result: 'Cancelled by user',
         terminate_reason: AgentTerminateMode.ABORTED,
       };
-       
+
       mockExecutorInstance.runEphemeral.mockImplementation(async function* () {
         yield { type: 'finished', output: mockOutput } as AgentEvent;
         return mockOutput;

@@ -160,7 +160,7 @@ describe('BrowserAgentInvocation', () => {
   });
 
   describe('execute', () => {
-    let mockExecutor: { run: ReturnType<typeof vi.fn> };
+    let mockExecutor: { runEphemeral: ReturnType<typeof vi.fn> };
 
     beforeEach(() => {
       vi.mocked(createBrowserAgentDefinition).mockResolvedValue({
@@ -180,9 +180,14 @@ describe('BrowserAgentInvocation', () => {
       });
 
       mockExecutor = {
-        run: vi.fn().mockResolvedValue({
-          result: JSON.stringify({ success: true }),
-          terminate_reason: 'GOAL',
+        runEphemeral: vi.fn().mockImplementation(async function* () {
+          yield {
+            type: 'finished',
+            output: {
+              result: JSON.stringify({ success: true }),
+              terminate_reason: 'GOAL',
+            },
+          };
         }),
       };
 
@@ -226,7 +231,10 @@ describe('BrowserAgentInvocation', () => {
     });
 
     it('should return error result when executor throws', async () => {
-      mockExecutor.run.mockRejectedValue(new Error('Unexpected crash'));
+      mockExecutor.runEphemeral.mockImplementation(async function* () {
+        yield* [] as never[];
+        throw new Error('Unexpected crash');
+      });
 
       const invocation = new BrowserAgentInvocation(
         mockConfig,
