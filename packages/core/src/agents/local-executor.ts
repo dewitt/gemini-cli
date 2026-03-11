@@ -4,6 +4,11 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
+import type {
+  Agent,
+  AgentEvent,
+  AgentRunOptions,
+} from '../interfaces/agent.js';
 import type { Config } from '../config/config.js';
 import { type AgentLoopContext } from '../config/agent-loop-context.js';
 import { reportError } from '../utils/errorReporting.js';
@@ -88,7 +93,9 @@ export function createUnauthorizedToolError(toolName: string): string {
  * This executor runs the agent in a loop, calling tools until it calls the
  * mandatory `complete_task` tool to signal completion.
  */
-export class LocalAgentExecutor<TOutput extends z.ZodTypeAny> {
+export class LocalAgentExecutor<TOutput extends z.ZodTypeAny>
+  implements Agent<AgentInputs, OutputObject>
+{
   readonly definition: LocalAgentDefinition<TOutput>;
 
   private readonly agentId: string;
@@ -101,6 +108,13 @@ export class LocalAgentExecutor<TOutput extends z.ZodTypeAny> {
 
   private get config(): Config {
     return this.context.config;
+  }
+
+  get name() {
+    return this.definition.name;
+  }
+  get description() {
+    return this.definition.description;
   }
 
   /**
@@ -246,21 +260,35 @@ export class LocalAgentExecutor<TOutput extends z.ZodTypeAny> {
    * @returns An {@link AgentTurnResult} object indicating whether to continue
    * or stop the agent loop.
    */
-  private async executeTurn(
+  private async *executeTurn(
     chat: GeminiChat,
     currentMessage: Content,
     turnCounter: number,
     combinedSignal: AbortSignal,
     timeoutSignal: AbortSignal, // Pass the timeout controller's signal
     onWaitingForConfirmation?: (waiting: boolean) => void,
-  ): Promise<AgentTurnResult> {
+  ): AsyncGenerator<AgentEvent, AgentTurnResult> {
     const promptId = `${this.agentId}#${turnCounter}`;
 
     await this.tryCompressChat(chat, promptId);
 
-    const { functionCalls } = await promptIdContext.run(promptId, async () =>
+    const modelStream = promptIdContext.run(promptId, () =>
       this.callModel(chat, currentMessage, combinedSignal, promptId),
     );
+
+    const modelIterator = modelStream[Symbol.asyncIterator]();
+    let modelNext = await modelIterator.next();
+    while (!modelNext.done) {
+      yield modelNext.value;
+      modelNext = await modelIterator.next();
+    }
+    const modelResult = modelNext.value;
+
+    if (!modelResult) {
+      throw new Error('callModel finished without returning a result.');
+    }
+
+    const { functionCalls } = modelResult;
 
     if (combinedSignal.aborted) {
       const terminateReason = timeoutSignal.aborted
@@ -275,10 +303,12 @@ export class LocalAgentExecutor<TOutput extends z.ZodTypeAny> {
 
     // If the model stops calling tools without calling complete_task, it's an error.
     if (functionCalls.length === 0) {
+      const err = `Agent stopped calling tools but did not call '${TASK_COMPLETE_TOOL_NAME}' to finalize the session.`;
       this.emitActivity('ERROR', {
-        error: `Agent stopped calling tools but did not call '${TASK_COMPLETE_TOOL_NAME}' to finalize the session.`,
+        error: err,
         context: 'protocol_violation',
       });
+      yield { type: 'error', error: new Error(err) };
       return {
         status: 'stop',
         terminateReason: AgentTerminateMode.ERROR_NO_COMPLETE_TASK_CALL,
@@ -286,13 +316,27 @@ export class LocalAgentExecutor<TOutput extends z.ZodTypeAny> {
       };
     }
 
-    const { nextMessage, submittedOutput, taskCompleted, aborted } =
-      await this.processFunctionCalls(
-        functionCalls,
-        combinedSignal,
-        promptId,
-        onWaitingForConfirmation,
+    const processStream = this.processFunctionCalls(
+      functionCalls,
+      combinedSignal,
+      promptId,
+      onWaitingForConfirmation,
+    );
+    const processIterator = processStream[Symbol.asyncIterator]();
+    let processNext = await processIterator.next();
+    while (!processNext.done) {
+      yield processNext.value;
+      processNext = await processIterator.next();
+    }
+
+    if (!processNext.value) {
+      throw new Error(
+        'processFunctionCalls finished without returning a result.',
       );
+    }
+
+    const { nextMessage, submittedOutput, taskCompleted, aborted } =
+      processNext.value;
 
     if (aborted) {
       return {
@@ -301,7 +345,6 @@ export class LocalAgentExecutor<TOutput extends z.ZodTypeAny> {
         finalResult: null,
       };
     }
-
     if (taskCompleted) {
       const finalResult = submittedOutput ?? 'Task completed successfully.';
       return {
@@ -350,7 +393,7 @@ export class LocalAgentExecutor<TOutput extends z.ZodTypeAny> {
    *
    * @returns The final result string if recovery was successful, or `null` if it failed.
    */
-  private async executeFinalWarningTurn(
+  private async *executeFinalWarningTurn(
     chat: GeminiChat,
     turnCounter: number,
     reason:
@@ -359,10 +402,14 @@ export class LocalAgentExecutor<TOutput extends z.ZodTypeAny> {
       | AgentTerminateMode.ERROR_NO_COMPLETE_TASK_CALL,
     externalSignal: AbortSignal, // The original signal passed to run()
     onWaitingForConfirmation?: (waiting: boolean) => void,
-  ): Promise<string | null> {
+  ): AsyncGenerator<AgentEvent, string | null> {
     this.emitActivity('THOUGHT_CHUNK', {
       text: `Execution limit reached (${reason}). Attempting one final recovery turn with a grace period.`,
     });
+    yield {
+      type: 'thought',
+      content: `Execution limit reached (${reason}). Attempting one final recovery turn.`,
+    };
 
     const recoveryStartTime = Date.now();
     let success = false;
@@ -386,7 +433,7 @@ export class LocalAgentExecutor<TOutput extends z.ZodTypeAny> {
         graceTimeoutController.signal,
       ]);
 
-      const turnResult = await this.executeTurn(
+      const turnStream = this.executeTurn(
         chat,
         recoveryMessage,
         turnCounter, // This will be the "last" turn number
@@ -394,6 +441,14 @@ export class LocalAgentExecutor<TOutput extends z.ZodTypeAny> {
         graceTimeoutController.signal, // Pass grace signal to identify a *grace* timeout
         onWaitingForConfirmation,
       );
+
+      const turnIterator = turnStream[Symbol.asyncIterator]();
+      let turnNext = await turnIterator.next();
+      while (!turnNext.done) {
+        yield turnNext.value;
+        turnNext = await turnIterator.next();
+      }
+      const turnResult = turnNext.value;
 
       if (
         turnResult.status === 'stop' &&
@@ -403,22 +458,27 @@ export class LocalAgentExecutor<TOutput extends z.ZodTypeAny> {
         this.emitActivity('THOUGHT_CHUNK', {
           text: 'Graceful recovery succeeded.',
         });
+        yield { type: 'thought', content: 'Graceful recovery succeeded.' };
         success = true;
         return turnResult.finalResult ?? 'Task completed during grace period.';
       }
 
       // Any other outcome (continue, error, non-GOAL stop) is a failure.
+      const errorMsg = `Graceful recovery attempt failed. Reason: ${turnResult.status}`;
       this.emitActivity('ERROR', {
-        error: `Graceful recovery attempt failed. Reason: ${turnResult.status}`,
+        error: errorMsg,
         context: 'recovery_turn',
       });
+      yield { type: 'error', error: new Error(errorMsg) };
       return null;
     } catch (error) {
       // This catch block will likely catch the 'Grace period timed out' error.
+      const errorMsg = `Graceful recovery attempt failed: ${String(error)}`;
       this.emitActivity('ERROR', {
-        error: `Graceful recovery attempt failed: ${String(error)}`,
+        error: errorMsg,
         context: 'recovery_turn',
       });
+      yield { type: 'error', error: new Error(errorMsg) };
       return null;
     } finally {
       clearTimeout(graceTimeoutId);
@@ -437,21 +497,30 @@ export class LocalAgentExecutor<TOutput extends z.ZodTypeAny> {
   }
 
   /**
-   * Runs the agent.
+   * Runs the agent sequentially with persisted state.
    *
    * @param inputs The validated input parameters for this invocation.
-   * @param signal An `AbortSignal` for cancellation.
-   * @returns A promise that resolves to the agent's final output.
+   * @param options Execution options (signal, maxTime, etc.)
+   * @returns An async generator that yields events and returns the final output.
    */
-  async run(inputs: AgentInputs, signal: AbortSignal): Promise<OutputObject> {
+  async *runAsync(
+    inputs: AgentInputs,
+    options?: AgentRunOptions,
+  ): AsyncGenerator<AgentEvent, OutputObject> {
+    const signal = options?.signal ?? new AbortController().signal;
     const startTime = Date.now();
     let turnCounter = 0;
     let terminateReason: AgentTerminateMode = AgentTerminateMode.ERROR;
     let finalResult: string | null = null;
 
     const maxTimeMinutes =
-      this.definition.runConfig.maxTimeMinutes ?? DEFAULT_MAX_TIME_MINUTES;
-    const maxTurns = this.definition.runConfig.maxTurns ?? DEFAULT_MAX_TURNS;
+      options?.maxTime ??
+      this.definition.runConfig.maxTimeMinutes ??
+      DEFAULT_MAX_TIME_MINUTES;
+    const maxTurns =
+      options?.maxTurns ??
+      this.definition.runConfig.maxTurns ??
+      DEFAULT_MAX_TURNS;
 
     const deadlineTimer = new DeadlineTimer(
       maxTimeMinutes * 60 * 1000,
@@ -531,7 +600,7 @@ export class LocalAgentExecutor<TOutput extends z.ZodTypeAny> {
             break;
           }
 
-          const turnResult = await this.executeTurn(
+          const turnStream = this.executeTurn(
             chat,
             currentMessage,
             turnCounter++,
@@ -539,6 +608,14 @@ export class LocalAgentExecutor<TOutput extends z.ZodTypeAny> {
             deadlineTimer.signal,
             onWaitingForConfirmation,
           );
+
+          const turnIterator = turnStream[Symbol.asyncIterator]();
+          let turnNext = await turnIterator.next();
+          while (!turnNext.done) {
+            yield turnNext.value;
+            turnNext = await turnIterator.next();
+          }
+          const turnResult = turnNext.value;
 
           if (turnResult.status === 'stop') {
             terminateReason = turnResult.terminateReason;
@@ -576,13 +653,21 @@ export class LocalAgentExecutor<TOutput extends z.ZodTypeAny> {
         terminateReason !== AgentTerminateMode.ABORTED &&
         terminateReason !== AgentTerminateMode.GOAL
       ) {
-        const recoveryResult = await this.executeFinalWarningTurn(
+        const recoveryStream = this.executeFinalWarningTurn(
           chat,
           turnCounter, // Use current turnCounter for the recovery attempt
           terminateReason,
           signal, // Pass the external signal
           onWaitingForConfirmation,
         );
+
+        const recoveryIterator = recoveryStream[Symbol.asyncIterator]();
+        let recoveryNext = await recoveryIterator.next();
+        while (!recoveryNext.done) {
+          yield recoveryNext.value;
+          recoveryNext = await recoveryIterator.next();
+        }
+        const recoveryResult = recoveryNext.value;
 
         if (recoveryResult !== null) {
           // Recovery Succeeded
@@ -596,12 +681,14 @@ export class LocalAgentExecutor<TOutput extends z.ZodTypeAny> {
               error: finalResult,
               context: 'timeout',
             });
+            yield { type: 'error', error: new Error(finalResult) };
           } else if (terminateReason === AgentTerminateMode.MAX_TURNS) {
             finalResult = `Agent reached max turns limit (${maxTurns}).`;
             this.emitActivity('ERROR', {
               error: finalResult,
               context: 'max_turns',
             });
+            yield { type: 'error', error: new Error(finalResult) };
           } else if (
             terminateReason === AgentTerminateMode.ERROR_NO_COMPLETE_TASK_CALL
           ) {
@@ -613,23 +700,28 @@ export class LocalAgentExecutor<TOutput extends z.ZodTypeAny> {
               error: finalResult,
               context: 'protocol_violation',
             });
+            yield { type: 'error', error: new Error(finalResult) };
           }
         }
       }
 
       // === FINAL RETURN LOGIC ===
       if (terminateReason === AgentTerminateMode.GOAL) {
-        return {
+        const output = {
           result: finalResult || 'Task completed.',
           terminate_reason: terminateReason,
         };
+        yield { type: 'finished', output };
+        return output;
       }
 
-      return {
+      const output = {
         result:
           finalResult || 'Agent execution was terminated before completion.',
         terminate_reason: terminateReason,
       };
+      yield { type: 'finished', output };
+      return output;
     } catch (error) {
       // Check if the error is an AbortError caused by our internal timeout.
       if (
@@ -642,7 +734,7 @@ export class LocalAgentExecutor<TOutput extends z.ZodTypeAny> {
 
         // Also use the unified recovery logic here
         if (chat && tools) {
-          const recoveryResult = await this.executeFinalWarningTurn(
+          const recoveryStream = this.executeFinalWarningTurn(
             chat,
             turnCounter, // Use current turnCounter
             AgentTerminateMode.TIMEOUT,
@@ -650,14 +742,24 @@ export class LocalAgentExecutor<TOutput extends z.ZodTypeAny> {
             onWaitingForConfirmation,
           );
 
+          const recoveryIterator = recoveryStream[Symbol.asyncIterator]();
+          let recoveryNext = await recoveryIterator.next();
+          while (!recoveryNext.done) {
+            yield recoveryNext.value;
+            recoveryNext = await recoveryIterator.next();
+          }
+          const recoveryResult = recoveryNext.value;
+
           if (recoveryResult !== null) {
             // Recovery Succeeded
             terminateReason = AgentTerminateMode.GOAL;
             finalResult = recoveryResult;
-            return {
+            const output = {
               result: finalResult,
               terminate_reason: terminateReason,
             };
+            yield { type: 'finished', output };
+            return output;
           }
         }
 
@@ -667,13 +769,20 @@ export class LocalAgentExecutor<TOutput extends z.ZodTypeAny> {
           error: finalResult,
           context: 'timeout',
         });
-        return {
+        yield { type: 'error', error: new Error(finalResult) };
+        const output = {
           result: finalResult,
           terminate_reason: terminateReason,
         };
+        yield { type: 'finished', output };
+        return output;
       }
 
       this.emitActivity('ERROR', { error: String(error) });
+      yield {
+        type: 'error',
+        error: error instanceof Error ? error : new Error(String(error)),
+      };
       throw error; // Re-throw other errors or external aborts.
     } finally {
       deadlineTimer.abort();
@@ -687,6 +796,33 @@ export class LocalAgentExecutor<TOutput extends z.ZodTypeAny> {
           terminateReason,
         ),
       );
+    }
+  }
+
+  /**
+   * Executes the agent's logic statelessly for a single turn.
+   */
+  async *runEphemeral(
+    inputs: AgentInputs,
+    options?: AgentRunOptions,
+  ): AsyncGenerator<AgentEvent, OutputObject> {
+    return yield* this.runAsync(inputs, options);
+  }
+
+  /**
+   * Legacy run method for backward compatibility.
+   * Wraps the generator-based runAsync() method.
+   */
+  async run(inputs: AgentInputs, signal: AbortSignal): Promise<OutputObject> {
+    const generator = this.runAsync(inputs, { signal });
+    let result: IteratorResult<AgentEvent, OutputObject>;
+
+    // Drain the generator
+    while (true) {
+      result = await generator.next();
+      if (result.done) {
+        return result.value;
+      }
     }
   }
 
@@ -730,12 +866,15 @@ export class LocalAgentExecutor<TOutput extends z.ZodTypeAny> {
    *
    * @returns The model's response, including any tool calls or text.
    */
-  private async callModel(
+  private async *callModel(
     chat: GeminiChat,
     message: Content,
     signal: AbortSignal,
     promptId: string,
-  ): Promise<{ functionCalls: FunctionCall[]; textResponse: string }> {
+  ): AsyncGenerator<
+    AgentEvent,
+    { functionCalls: FunctionCall[]; textResponse: string }
+  > {
     const modelConfigAlias = getModelConfigAlias(this.definition);
 
     // Resolve the model config early to get the concrete model string (which may be `auto`).
@@ -798,7 +937,9 @@ export class LocalAgentExecutor<TOutput extends z.ZodTypeAny> {
           parts?.find((p) => p.thought)?.text || '',
         );
         if (subject) {
+          const event: AgentEvent = { type: 'thought', content: subject };
           this.emitActivity('THOUGHT_CHUNK', { text: subject });
+          yield event;
         }
 
         // Collect any function calls requested by the model.
@@ -815,6 +956,7 @@ export class LocalAgentExecutor<TOutput extends z.ZodTypeAny> {
 
         if (text) {
           textResponse += text;
+          yield { type: 'content', content: text };
         }
       }
     }
@@ -872,17 +1014,20 @@ export class LocalAgentExecutor<TOutput extends z.ZodTypeAny> {
    *
    * @returns A new `Content` object for history, any submitted output, and completion status.
    */
-  private async processFunctionCalls(
+  private async *processFunctionCalls(
     functionCalls: FunctionCall[],
     signal: AbortSignal,
     promptId: string,
     onWaitingForConfirmation?: (waiting: boolean) => void,
-  ): Promise<{
-    nextMessage: Content;
-    submittedOutput: string | null;
-    taskCompleted: boolean;
-    aborted: boolean;
-  }> {
+  ): AsyncGenerator<
+    AgentEvent,
+    {
+      nextMessage: Content;
+      submittedOutput: string | null;
+      taskCompleted: boolean;
+      aborted: boolean;
+    }
+  > {
     const allowedToolNames = new Set(this.toolRegistry.getAllToolNames());
     // Always allow the completion tool
     allowedToolNames.add(TASK_COMPLETE_TOOL_NAME);
@@ -926,6 +1071,18 @@ export class LocalAgentExecutor<TOutput extends z.ZodTypeAny> {
         callId,
       });
 
+      // Yield the start of the tool call
+      yield {
+        type: 'tool_call',
+        call: {
+          callId,
+          name: toolName,
+          args,
+          prompt_id: promptId,
+          isClientInitiated: false,
+        },
+      };
+
       if (toolName === TASK_COMPLETE_TOOL_NAME) {
         if (taskCompleted) {
           const error =
@@ -942,6 +1099,7 @@ export class LocalAgentExecutor<TOutput extends z.ZodTypeAny> {
             name: toolName,
             error,
           });
+          yield { type: 'error', error: new Error(error) };
           continue;
         }
 
@@ -969,6 +1127,7 @@ export class LocalAgentExecutor<TOutput extends z.ZodTypeAny> {
                 name: toolName,
                 error,
               });
+              yield { type: 'error', error: new Error(error) };
               continue;
             }
 
@@ -994,6 +1153,26 @@ export class LocalAgentExecutor<TOutput extends z.ZodTypeAny> {
               id: callId,
               output: 'Output submitted and task completed.',
             });
+            yield {
+              type: 'tool_result',
+              result: {
+                callId,
+                responseParts: [
+                  {
+                    functionResponse: {
+                      name: toolName,
+                      response: {
+                        result: 'Output submitted and task completed.',
+                      },
+                      id: callId,
+                    },
+                  },
+                ],
+                resultDisplay: undefined,
+                error: undefined,
+                errorType: undefined,
+              },
+            };
           } else {
             // Failed to provide required output.
             taskCompleted = false; // Revoke completion status
@@ -1011,6 +1190,7 @@ export class LocalAgentExecutor<TOutput extends z.ZodTypeAny> {
               callId,
               error,
             });
+            yield { type: 'error', error: new Error(error) };
           }
         } else {
           // No outputConfig - use default 'result' parameter
@@ -1036,6 +1216,26 @@ export class LocalAgentExecutor<TOutput extends z.ZodTypeAny> {
               id: callId,
               output: 'Result submitted and task completed.',
             });
+            yield {
+              type: 'tool_result',
+              result: {
+                callId,
+                responseParts: [
+                  {
+                    functionResponse: {
+                      name: toolName,
+                      response: {
+                        status: 'Result submitted and task completed.',
+                      },
+                      id: callId,
+                    },
+                  },
+                ],
+                resultDisplay: undefined,
+                error: undefined,
+                errorType: undefined,
+              },
+            };
           } else {
             // No result provided - this is an error for agents expected to return results
             taskCompleted = false; // Revoke completion
@@ -1054,6 +1254,7 @@ export class LocalAgentExecutor<TOutput extends z.ZodTypeAny> {
               callId,
               error,
             });
+            yield { type: 'error', error: new Error(error) };
           }
         }
         continue;
@@ -1078,6 +1279,7 @@ export class LocalAgentExecutor<TOutput extends z.ZodTypeAny> {
           callId,
           error,
         });
+        yield { type: 'error', error: new Error(error) };
 
         continue;
       }
@@ -1115,6 +1317,7 @@ export class LocalAgentExecutor<TOutput extends z.ZodTypeAny> {
             id: call.request.callId,
             output: call.response.resultDisplay,
           });
+          yield { type: 'tool_result', result: call.response };
         } else if (call.status === 'error') {
           this.emitActivity('ERROR', {
             context: 'tool_call',
@@ -1122,6 +1325,11 @@ export class LocalAgentExecutor<TOutput extends z.ZodTypeAny> {
             callId: call.request.callId,
             error: call.response.error?.message || 'Unknown error',
           });
+          yield {
+            type: 'error',
+            error: new Error(call.response.error?.message || 'Unknown error'),
+          };
+          yield { type: 'tool_result', result: call.response };
         } else if (call.status === 'cancelled') {
           this.emitActivity('ERROR', {
             context: 'tool_call',
@@ -1130,6 +1338,8 @@ export class LocalAgentExecutor<TOutput extends z.ZodTypeAny> {
             error: 'Request cancelled.',
           });
           aborted = true;
+          yield { type: 'error', error: new Error('Tool call was cancelled.') };
+          yield { type: 'tool_result', result: call.response };
         }
 
         // Add result to syncResults to preserve order later
