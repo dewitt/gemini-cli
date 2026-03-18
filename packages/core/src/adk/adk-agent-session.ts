@@ -4,8 +4,8 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { InMemoryRunner, LlmAgent } from '@google/adk';
-import type { AgentEvent as AdkAgentEvent } from '@google/adk';
+import { InMemoryRunner, LlmAgent, getFunctionCalls, getFunctionResponses } from '@google/adk';
+import type { Event as AdkAgentEvent } from '@google/adk';
 import type { AgentSession, AgentSend, AgentEvent } from '../agent/types.js';
 import type { AnyDeclarativeTool } from '../tools/tools.js';
 import type { GeminiClient } from '../core/client.js';
@@ -32,10 +32,12 @@ export class AdkAgentSession implements AgentSession {
   private _eventCounter = 0;
   private _streamDone = false;
   private _subscribers: Set<() => void> = new Set();
-  private _sessionId = crypto.randomUUID();
+  private _sessionId: `${string}-${string}-${string}-${string}-${string}`;
 
   constructor(deps: AdkSessionDeps) {
     this._streamId = deps.streamId ?? crypto.randomUUID();
+    // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+    this._sessionId = (deps.streamId ?? crypto.randomUUID()) as `${string}-${string}-${string}-${string}-${string}`;
 
     const adkModel = new AdkGeminiModel(
       deps.client,
@@ -60,7 +62,10 @@ export class AdkAgentSession implements AgentSession {
       tools: adkTools,
     });
 
-    this._runner = new InMemoryRunner({ agent });
+    this._runner = new InMemoryRunner({
+      appName: 'gemini-cli',
+      agent,
+    });
   }
 
   async send(payload: AgentSend): Promise<{ streamId: string }> {
@@ -143,7 +148,21 @@ export class AdkAgentSession implements AgentSession {
         this._makeInternalEvent('stream_start', { streamId: this._streamId }),
       ]);
 
-      const stream = this._runner.runStream({
+      const sessionExists = await this._runner.sessionService.getSession({
+        appName: 'gemini-cli',
+        userId: 'local-user',
+        sessionId: this._sessionId,
+      });
+
+      if (!sessionExists) {
+        await this._runner.sessionService.createSession({
+          appName: 'gemini-cli',
+          userId: 'local-user',
+          sessionId: this._sessionId,
+        });
+      }
+
+      const stream = this._runner.runAsync({
         userId: 'local-user',
         sessionId: this._sessionId,
         newMessage: {
@@ -185,59 +204,62 @@ export class AdkAgentSession implements AgentSession {
   private _translateAdkEvent(adkEvent: AdkAgentEvent): AgentEvent[] {
     const out: AgentEvent[] = [];
 
-    switch (adkEvent.type) {
-      case 'content':
-        out.push(
-          this._makeInternalEvent('message', {
-            role: 'agent',
-            content: [{ type: 'text', text: adkEvent.content }],
-          }),
-        );
-        break;
-      case 'thought':
-        out.push(
-          this._makeInternalEvent('message', {
-            role: 'agent',
-            content: [{ type: 'thought', thought: adkEvent.content }],
-            _meta: { source: 'agent' },
-          }),
-        );
-        break;
-      case 'tool_call':
-        out.push(
-          this._makeInternalEvent('tool_request', {
-            requestId: adkEvent.call.id ?? crypto.randomUUID(),
-            name: adkEvent.call.name,
-            // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
-            args: adkEvent.call.args as Record<string, unknown>,
-          }),
-        );
-        break;
-      case 'tool_result':
-        out.push(
-          this._makeInternalEvent('tool_response', {
-            requestId: adkEvent.result.id,
-            name: adkEvent.result.name,
-            content: [
-              { type: 'text', text: JSON.stringify(adkEvent.result.response) },
-            ],
-          }),
-        );
-        break;
-      case 'error':
-        out.push(
-          this._makeInternalEvent('error', {
-            status: 'INTERNAL',
-            message: adkEvent.error.message,
-            fatal: true,
-          }),
-        );
-        break;
-      case 'finished':
-        // Stream end is handled after loop completes
-        break;
-      default:
-        break;
+    // Text content
+    if (adkEvent.content && adkEvent.content.parts) {
+      const textParts = adkEvent.content.parts.filter((p: unknown) => {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any
+        return (p as any).text !== undefined;
+      });
+      if (textParts.length > 0) {
+        // eslint-disable-next-line @typescript-eslint/no-unsafe-member-access, @typescript-eslint/no-explicit-any, @typescript-eslint/no-unsafe-return
+        const combinedText = textParts.map((p: any) => p.text).join('');
+        if (combinedText) {
+          out.push(
+            this._makeInternalEvent('message', {
+              role: 'agent',
+              content: [{ type: 'text', text: combinedText }],
+            }),
+          );
+        }
+      }
+    }
+
+    // Function calls
+    const functionCalls = getFunctionCalls(adkEvent);
+    for (const call of functionCalls) {
+      out.push(
+        this._makeInternalEvent('tool_request', {
+          requestId: call.id ?? crypto.randomUUID(),
+          name: call.name,
+          // eslint-disable-next-line @typescript-eslint/no-unsafe-type-assertion
+          args: call.args as Record<string, unknown>,
+        }),
+      );
+    }
+
+    // Function responses
+    const functionResponses = getFunctionResponses(adkEvent);
+    for (const response of functionResponses) {
+      out.push(
+        this._makeInternalEvent('tool_response', {
+          requestId: response.id,
+          name: response.name,
+          content: [
+            { type: 'text', text: JSON.stringify(response.response) },
+          ],
+        }),
+      );
+    }
+
+    // Errors
+    if (adkEvent.errorCode || adkEvent.errorMessage) {
+      out.push(
+        this._makeInternalEvent('error', {
+          status: 'INTERNAL',
+          message: adkEvent.errorMessage ?? adkEvent.errorCode ?? 'Unknown error',
+          fatal: true,
+        }),
+      );
     }
 
     return out;

@@ -18,7 +18,7 @@ dependency chain.
    interface, standardizing input (`send`) and output (`stream`) via the
    `AgentEvent` protocol.
 1. **ADK enhancements:** The ADK framework supports critical features like
-   streaming (`runStream`) and robust error handling.
+   streaming (`runAsync`) and robust error handling.
 1. **Session implementation:** Gemini CLI implements `AdkAgentSession` to bridge
    the gap, acting as a lightweight wrapper around the ADK `InMemoryRunner`.
 1. **Activation:** The ADK backend is enabled via the `experimental.useAdk`
@@ -34,10 +34,10 @@ the ADK runner to the interactive CLI environment.
 Gemini CLI relies on real-time feedback. Users expect to see the agent thinking,
 calling tools, and streaming partial content tokens.
 
-We utilize the `runStream(input)` method exposed by the `InMemoryRunner` in the
-ADK (available in the local `third_party/adk-js-private` dependency).
+We utilize the `runAsync(input)` method exposed by the `InMemoryRunner` in the
+ADK.
 
-- **Mechanism:** `AdkAgentSession` calls `runner.runStream()`, which returns an
+- **Mechanism:** `AdkAgentSession` calls `runner.runAsync()`, which returns an
   `AsyncGenerator`.
 - **Event mapping:** The session translates ADK internal events (content,
   thought, tool call) directly into standard CLI `AgentEvent` types (for
@@ -82,28 +82,23 @@ The `AdkAgentSession` is the primary bridge between the ADK and Gemini CLI.
   ADK messages, manages the session lifecycle, and converts the ADK event stream
   into a pure `AgentEvent` asynchronous iterator for the CLI UI.
 
-### Future adapters
+### Adapters
 
-While the `AgentSession` handles the high-level loop, future development will
-introduce specialized adapters for models and tools to ensure seamless
-dependency injection.
+To ensure seamless dependency injection and compatibility with the CLI's existing functionality, we have implemented specialized adapters:
 
-- **Model adapter:** Allows ADK agents to use the CLI's pre-configured,
-  authenticated Gemini client.
-- **Tool adapter:** Exposes CLI tools (with built-in telemetry and permission
-  checks) to the ADK agent.
+- **Model adapter (`AdkGeminiModel`):** Allows ADK agents to use the CLI's pre-configured, authenticated Gemini client (`GeminiClient`). This ensures the ADK agent respects the user's local auth state and model selections.
+- **Tool adapter (`AdkToolAdapter`):** Exposes CLI tools (`AnyDeclarativeTool`) to the ADK agent, wrapping them so they can be executed by the CLI's central `Scheduler`. This preserves built-in telemetry, context limits, and safety permission checks.
 
 ## Configuration
 
-To enable the ADK backend for the main interactive loop, set the experimental
-feature flag.
+To enable the ADK backend for the main interactive loop, set the `GEMINI_CLI_USE_ADK` environment variable.
 
 ```bash
-npm start -- config set experimental.useAdk true
+GEMINI_CLI_USE_ADK=true npm run start
 ```
 
-This flag instructs the core factory to instantiate the `AdkAgentSession`
-instead of the legacy loop.
+This flag instructs the core CLI loop to instantiate the `AdkAgentSession`
+instead of the legacy `LegacyAgentSession`.
 
 ## Recommendations for ADK TS improvements
 
@@ -139,7 +134,7 @@ hyphens.
 
 ### Fine-grained execution control
 
-The `runStream` implementation currently auto-executes tools. For full
+The `runAsync` implementation currently auto-executes tools. For full
 human-in-the-loop support, the host needs the ability to pause execution at the
 tool call stage.
 
